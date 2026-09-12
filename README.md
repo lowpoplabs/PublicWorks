@@ -10,6 +10,10 @@ bucket drains faster the more players are online (they're using more resources).
 With the default settings, up to 2 players drain at 1×; each extra player adds +25%,
 capped at 3×. Bots/NPC players never count toward usage.
 
+<!-- lpl:links -->
+**[Download v2.8.2](https://github.com/lowpoplabs/PublicWorks/releases/latest)** · **Flyer:** [web](https://lowpoplabs.github.io/flyers/PublicWorks.html) / [PDF](PublicWorks-Flyer.pdf) · **[Changelog](CHANGELOG.md)** · **[Ko-fi](https://ko-fi.com/lowpoplabs)**
+<!-- /lpl:links -->
+
 ## Services (100 scrap / day each, configurable)
 
 | Service | Effect | Mechanism |
