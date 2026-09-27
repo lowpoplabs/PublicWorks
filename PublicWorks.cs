@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("PublicWorks", "LowPopLabs", "2.8.2")]
+    [Info("PublicWorks", "LowPopLabs", "2.9.0")]
     [Description("A Public Works office: pay a clerk NPC scrap to keep island utilities running — power, water, gas, markets, garages, airport, internet, free trains, and Cobalt protection (reactive-only patrol heli & Bradley). Random faults break out at monuments; players take repair contracts from the office to fix them for scrap.")]
     public class PublicWorks : RustPlugin
     {
@@ -1828,6 +1828,8 @@ namespace Oxide.Plugins
                     warnLevel[fault.Service] = 0;
                 }
                 AnnounceAll("FaultPlayerFixed", LabelFor(fault.Service, null), fixer.displayName, reward);
+                // For other plugins (e.g. a reputation system crediting civic work).
+                Interface.CallHook("OnPublicWorksRepair", fixer, fault.Service, fault.Severity == "major");
             }
             else
             {
@@ -3376,6 +3378,7 @@ namespace Oxide.Plugins
             {
                 Reply(player, "ToppedUp", LabelFor(serviceKey, player.UserIDString), FormatSpan(GetBanked(serviceKey)));
             }
+            Interface.CallHook("OnPublicWorksPurchase", player, serviceKey, config.PricePerDay);
             return true;
         }
 

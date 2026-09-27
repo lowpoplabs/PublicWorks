@@ -393,6 +393,13 @@ Provided as-is. Bug reports welcome via GitHub Issues. No Discord, no custom wor
 
 MIT — see [LICENSE](LICENSE).
 
+## Hooks for other plugins
+
+- `OnPublicWorksRepair(BasePlayer fixer, string service, bool major)`: a player finished a repair contract (not the crew auto-fix).
+- `OnPublicWorksPurchase(BasePlayer player, string service, int scrap)`: a player paid for a day of a service.
+
+Cobalt Papers Please listens to both and credits the player with standing.
+
 ## Compatibility notes
 
 - Built against the September 3, 2026 Rust update (build 2633.288). Versions from 2.8.1 onward need that build or newer; the previous version is the last one that compiles on August builds.

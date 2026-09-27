@@ -5,6 +5,11 @@ All notable changes to PublicWorks are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.9.0] - 2026-09-27
+
+### Added
+- Two hooks for other plugins: `OnPublicWorksRepair(BasePlayer fixer, string service, bool major)` when a player finishes a repair contract, and `OnPublicWorksPurchase(BasePlayer player, string service, int scrap)` when a player pays for a day of a service. Cobalt Papers Please uses them to credit civic work with standing. No gameplay change on its own.
+
 ## [2.8.2] - 2026-09-12
 
 First public release on GitHub — no gameplay changes.
