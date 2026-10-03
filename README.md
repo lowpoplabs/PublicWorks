@@ -18,7 +18,7 @@ capped at 3×. Bots/NPC players never count toward usage.
 
 | Service | Effect | Mechanism |
 |---|---|---|
-| Electricity | Power Plant & street grid stay running, poles output extra power, green recyclers run at full 60% efficiency | Force-powers Power Plant + all roadside powerline access points + (config-toggleable) the green recyclers at non-service monuments, which run at 50% recycle efficiency unpowered and 60% powered since Power Trip; scales `powerlineAvailablePower` in the shared stage config by the `PoleOutputMultiplier` (default 2×, so 60 power at max stage instead of 30) |
+| Electricity | Power Plant & street grid stay running, poles output extra power, green recyclers run at full 60% efficiency | Force-powers Power Plant + all roadside powerline access points + (config-toggleable) the green recyclers at non-service monuments, which run at 50% recycle efficiency unpowered and 60% powered since Power Trip; feeds every pole its maximum output times the `PoleOutputMultiplier` (default 2×, so 100 power per pole) whether or not the plant has fuses in |
 | Water | Water Treatment stays pressurized | Force-powers WTP + pins `WaterTreatmentWaterTank.Pressure` to max |
 | Gas | Dome crude pumps stay active | Force-powers all 3 Dome pumps + synthetic oil-rig switch signal (`OnOilSwitchToggled`), no rig trip required; each pump holds up to 500 crude (configurable) and pauses until players collect |
 | Markets | Supermarket freezers stay stocked, grocery shop & drone delivery open | Force-powers supermarket generators + spawns a self-restocking NPC grocery vending machine (scrap prices, config-driven stock) and a working drone marketplace at every supermarket |
@@ -32,6 +32,49 @@ capped at 3×. Bots/NPC players never count toward usage.
 that monument's entities, re-asserted every 30s. No saved entity fields are modified;
 everything reverts to vanilla on expiry or plugin unload. Vanilla heavy-fuse gameplay
 keeps working in parallel — paid services just guarantee their monument stays on.
+
+## Pole transformers (v2.10)
+
+Only some roadside power poles come with a transformer players can wire into. A
+player can have the department fit one to a plain pole:
+
+1. Stand next to the pole and type `/pw pole`. That files a work order for it (one on
+   file per player; `/pw pole cancel` withdraws it). Nothing is built yet.
+2. Pay the order (250 scrap, configurable) at the office clerk, or over the office
+   phone line. It shows as an extra row on the services panel.
+3. A crew truck spawns down the road, drives to the pole, the worker gets out for a
+   quarter of a minute, the transformer appears, and the crew drives off.
+
+- It is the same entity the game puts on its own transformer poles: same model, same
+  wire ports, same output, and it follows the Electricity service (output multiplier,
+  faults, outages) like every other pole.
+- It is a public hookup, like the vanilla ones: anyone can wire into it.
+- Plain poles can't be climbed (the game's invisible pole ladder only exists on its own
+  transformer poles), so the crew leaves two wooden ladders up the pole. They can't be
+  damaged or picked up and go when the transformer goes. Config-toggleable.
+- It rides in the map save, so it survives restarts and plugin reloads and goes away
+  on a map wipe.
+- One per player per wipe by default (`Pole transformers: maximum each player can buy
+  per wipe`, 0 = unlimited). Monument poles and the big pylons can't be upgraded.
+- The crew truck can't be damaged, looted or driven. If no road passes the pole, the
+  road is blocked, or the plugin reloads mid-job, the paid order is fitted anyway.
+  `Pole transformers: a crew truck drives up to do the install` turns the truck off.
+- Admins: `/pw pole remove` takes a purchased transformer off the pole you stand next
+  to. Map-spawned transformers are never touched.
+
+**The wire tool reads 0 on a pole.** Since the September 2026 Rust update a pole's
+readout comes from the number of heavy fuses in the power plant. While the Electricity
+service is paid the plugin feeds the poles itself, so with no fuses in the plant the
+readout says 0 but the power is delivered. The services panel carries a one-line note.
+
+## Office phone line (v2.10)
+
+Dial **5559-6757** (555-WORKS; it is in the phone directory as "Public Works Office")
+from any telephone and the services panel opens wherever you are. Paying for a day of
+service, a pole work order or a Protection billing hold works as it does at the desk,
+with a convenience fee (10 scrap, configurable) added to each payment. Repair contracts
+are still handed out in person. Number, directory name, fee and an off switch are in
+the config under `Office phone line: ...`.
 
 ## Random fault events (v2)
 
@@ -241,6 +284,9 @@ The tower's 5-light grid-stage panel reads the *island-wide* Power Plant stage
   estimated time left at current usage, and a PAY button. The footer shows the
   current usage rate (`×2.00 (6 online)`) and your scrap balance.
 - `/pw` — shows the office grid location (or opens the panel if you're at the office).
+- `/pw pole` — next to a plain roadside power pole: files a work order for a
+  transformer on it (`/pw pole cancel` withdraws it). Pay it at the office or by phone.
+- Call 5559-6757 from any telephone to open the panel from afar (+10 scrap per payment).
 - `/pwinfo` — opens a **read-only** status panel from anywhere: every service's state,
   banked time, and any active fault (with its grid square). Paying and taking repair
   contracts still require standing at the office; the footer points you there.
@@ -328,6 +374,7 @@ marker, and the entire pasted building, even across restarts.
 ## Admin commands
 
 - `/pw setoffice` — paste office building (if configured) + place clerk where you stand
+- `/pw pole remove` — remove the purchased transformer from the pole you stand next to
 - `/pw setclerk` — reposition only the clerk
 - `/pw setboombox` — place/move the office boombox where you stand
 - `/pw pastefile <name>` — set/clear the CopyPaste build used for the office
@@ -397,6 +444,7 @@ MIT — see [LICENSE](LICENSE).
 
 - `OnPublicWorksRepair(BasePlayer fixer, string service, bool major)`: a player finished a repair contract (not the crew auto-fix).
 - `OnPublicWorksPurchase(BasePlayer player, string service, int scrap)`: a player paid for a day of a service.
+- `OnPublicWorksPoleHookup(BasePlayer player, PowergridIOAccessPoint hookup, int scrap)`: the crew fitted a transformer a player paid for. `player` is null if the buyer has logged off by then.
 
 Cobalt Papers Please listens to both and credits the player with standing.
 

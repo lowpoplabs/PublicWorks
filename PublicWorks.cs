@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("PublicWorks", "LowPopLabs", "2.9.0")]
+    [Info("PublicWorks", "LowPopLabs", "2.10.0")]
     [Description("A Public Works office: pay a clerk NPC scrap to keep island utilities running — power, water, gas, markets, garages, airport, internet, free trains, and Cobalt protection (reactive-only patrol heli & Bradley). Random faults break out at monuments; players take repair contracts from the office to fix them for scrap.")]
     public class PublicWorks : RustPlugin
     {
@@ -188,6 +188,30 @@ namespace Oxide.Plugins
                 ["CopyPasteMissing"] = "CopyPaste plugin is not loaded — placed clerk only.",
                 ["PasteFailed"] = "Office paste failed: {0}",
                 ["Pasting"] = "Pasting office building '{0}'...",
+                ["PoleDisabled"] = "the department isn't taking transformer work orders.",
+                ["PoleNoneNear"] = "stand next to a roadside power pole to order a transformer for it.",
+                ["PoleHasHookup"] = "this pole already has a transformer — wire into it with a wire tool.",
+                ["PoleLimit"] = "you've used all {0} of your transformer work order(s) for this wipe.",
+                ["PoleOrderFiled"] = "work order filed for the pole at grid {0}: <color=#8bc34a>{1} scrap</color>. Pay it at the office{2} and a crew will come out. <color=#8bc34a>/pw pole cancel</color> withdraws it.",
+                ["PoleOrderPhone"] = ", or call <color=#8bc34a>{0}</color> (+{1} scrap)",
+                ["PoleOrderNone"] = "you have no work order on file — stand next to a roadside power pole and type /pw pole.",
+                ["PoleOrderCancelled"] = "work order withdrawn.",
+                ["PoleOrderBusy"] = "a crew is already on its way for your work order.",
+                ["PoleOrderTaken"] = "someone else has already paid for a transformer on this pole.",
+                ["PoleOrderNeedScrap"] = "you need {0} scrap to pay for this work order.",
+                ["PoleCrewDispatched"] = "work order paid (-{0} scrap). A crew is on its way to grid {1} — about {2} seconds out.",
+                ["PoleFitted"] = "the crew has fitted your transformer at grid {0}. Climb the ladder and wire in with a wire tool — it's a public hookup and its output follows the power grid. The wire tool reads 0 on a pole; the power still flows.",
+                ["PoleFailed"] = "the crew couldn't fit a transformer here — your scrap has been refunded.",
+                ["PhoneHint"] = "or call the office on <color=#8bc34a>{0}</color> from any telephone to pay from afar (+{1} scrap per payment).",
+                ["NeedScrapTotal"] = "you need {0} scrap for that ({1} + {2} phone fee).",
+                ["UiSubtitlePhone"] = "Phone line — {0} scrap per day each, plus a {1} scrap convenience fee per payment",
+                ["UiOrderLabel"] = "Work order — pole transformer",
+                ["UiOrderDesc"] = "Roadside pole at grid {0}; a crew drives out once it's paid",
+                ["UiOrderPay"] = "PAY {0}",
+                ["UiOrderCrew"] = "CREW EN ROUTE",
+                ["UiPoleNote"] = "Pole transformers read 0 on the wire tool while the plant has no fuses — the power still flows.",
+                ["PoleRemoved"] = "Purchased transformer removed from this pole.",
+                ["PoleNotPurchased"] = "No purchased transformer on a pole within reach — map-spawned ones are left alone.",
                 ["UsageGrant"] = "Usage: /pw grant <service|all> [days]",
                 ["Granted"] = "Granted {0} day(s) of {1}.",
                 ["UsageRevoke"] = "Usage: /pw revoke <service|all>",
@@ -201,7 +225,7 @@ namespace Oxide.Plugins
                 ["UsageClearfault"] = "Usage: /pw clearfault <service|all>",
                 ["FaultsCleared"] = "Resolved {0} fault(s).",
                 ["NoFaultsMatch"] = "No matching active faults.",
-                ["Usage"] = "Usage: /pw | /pw setoffice | /pw setclerk | /pw setboombox | /pw setpump | /pw removepump | /pw clearpumps | /pw pumpinfo | /pw setgrocer | /pw cleargrocer | /pw setmarket | /pw clearmarket | /pw pastefile <name> | /pw removeoffice | /pw grant <service|all> [days] | /pw revoke <service|all> | /pw fault <service> [minor|major] | /pw clearfault <service|all> | /pw hostile [clear] | /pw perf",
+                ["Usage"] = "Usage: /pw | /pw pole [cancel|remove] | /pw setoffice | /pw setclerk | /pw setboombox | /pw setpump | /pw removepump | /pw clearpumps | /pw pumpinfo | /pw setgrocer | /pw cleargrocer | /pw setmarket | /pw clearmarket | /pw pastefile <name> | /pw removeoffice | /pw grant <service|all> [days] | /pw revoke <service|all> | /pw fault <service> [minor|major] | /pw clearfault <service|all> | /pw hostile [clear] | /pw perf",
             }, this);
         }
 
@@ -424,6 +448,54 @@ namespace Oxide.Plugins
             [JsonProperty("Powerline pole output multiplier while Electricity service is active (1 = vanilla 12/18/24/30)")]
             public float PoleOutputMultiplier = 2f;
 
+            [JsonProperty("Pole transformers: players can pay to fit a transformer to a plain roadside power pole (/pw pole)")]
+            public bool PoleHookupEnabled = true;
+
+            [JsonProperty("Pole transformers: scrap price")]
+            public int PoleHookupPrice = 250;
+
+            [JsonProperty("Pole transformers: maximum each player can buy per wipe (0 = unlimited)")]
+            public int PoleHookupMaxPerPlayer = 1;
+
+            [JsonProperty("Pole transformers: how close the player must stand to the pole (meters)")]
+            public float PoleHookupRange = 4f;
+
+            [JsonProperty("Pole transformers: a crew truck drives up to do the install (false = fitted the moment it's paid)")]
+            public bool CrewEnabled = true;
+
+            [JsonProperty("Pole transformers: the crew truck starts this far down the road (meters)")]
+            public float CrewApproachDistance = 150f;
+
+            [JsonProperty("Pole transformers: crew truck speed (meters per second)")]
+            public float CrewSpeed = 9f;
+
+            [JsonProperty("Pole transformers: seconds the crew works at the pole")]
+            public float CrewWorkSeconds = 15f;
+
+            [JsonProperty("Pole transformers: crew worker name")]
+            public string CrewName = "Public Works Crew";
+
+            [JsonProperty("Pole transformers: crew worker outfit (item shortnames, optional @skinId, same format as the clerk outfit)", ObjectCreationHandling = ObjectCreationHandling.Replace)]
+            public List<string> CrewOutfit = new List<string>
+            {
+                "hat.miner", "jumpsuit.suit.blue", "burlap.gloves", "shoes.boots"
+            };
+
+            [JsonProperty("Office phone line: players can call the office from any telephone to pay from afar")]
+            public bool PhoneEnabled = true;
+
+            [JsonProperty("Office phone line: number (8 digits; default 5559-6757 = 555-WORKS)")]
+            public int PhoneNumber = 55596757;
+
+            [JsonProperty("Office phone line: directory name")]
+            public string PhoneName = "Public Works Office";
+
+            [JsonProperty("Office phone line: convenience fee added to each payment made by phone (scrap)")]
+            public int PhoneFee = 10;
+
+            [JsonProperty("Pole transformers: the crew leaves wooden ladders up the pole (plain poles can't be climbed otherwise)")]
+            public bool PoleHookupLadders = true;
+
             [JsonProperty("Electricity service also powers green recyclers at other monuments (60% recycle efficiency instead of 50%)")]
             public bool ElectricityPowersRecyclers = true;
 
@@ -593,8 +665,31 @@ namespace Oxide.Plugins
             [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public Dictionary<string, int> PumpFuel = new Dictionary<string, int>();
 
+            // Purchased pole transformers: entity net id -> buyer. The entities themselves
+            // ride in the map save; this only records which ones were bought, and by whom.
+            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+            public Dictionary<ulong, ulong> PoleHookups = new Dictionary<ulong, ulong>();
+
+            // Work orders on file: buyer -> the pole they picked. Paid = the crew is on its
+            // way; a paid order still on file at load is fitted on the spot.
+            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+            public Dictionary<ulong, PoleOrder> PoleOrders = new Dictionary<ulong, PoleOrder>();
+
+            // transformer net id -> the ladders left on its pole
+            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+            public Dictionary<ulong, List<ulong>> PoleLadders = new Dictionary<ulong, List<ulong>>();
+
             public double LastFaultEpoch;
             public double AirportBreakUntil;   // epoch seconds the Airfield resupply break ends (0 = none)
+        }
+
+        private class PoleOrder
+        {
+            public float X, Y, Z;
+            public bool Paid;
+
+            [JsonIgnore]
+            public Vector3 Position => new Vector3(X, Y, Z);
         }
 
         private StoredData data;
@@ -604,6 +699,9 @@ namespace Oxide.Plugins
             data = Interface.Oxide.DataFileSystem.ReadObject<StoredData>(Name) ?? new StoredData();
             if (data.Banked == null) data.Banked = new Dictionary<string, double>();
             if (data.PumpFuel == null) data.PumpFuel = new Dictionary<string, int>();
+            if (data.PoleHookups == null) data.PoleHookups = new Dictionary<ulong, ulong>();
+            if (data.PoleLadders == null) data.PoleLadders = new Dictionary<ulong, List<ulong>>();
+            if (data.PoleOrders == null) data.PoleOrders = new Dictionary<ulong, PoleOrder>();
 
             // Migrate pre-bucket expiry timestamps into banked seconds.
             if (data.Banked.Count == 0 && data.Expiry != null && data.Expiry.Count > 0)
@@ -725,6 +823,16 @@ namespace Oxide.Plugins
             Puts($"PublicWorks v{Version} loaded - by LowPopLabs - ko-fi.com/lowpoplabs");
         }
 
+        // Purchased transformers go with the map; net ids are reused after a wipe.
+        private void OnNewSave(string filename)
+        {
+            if (data == null || (data.PoleHookups.Count == 0 && data.PoleLadders.Count == 0 && data.PoleOrders.Count == 0)) return;
+            data.PoleHookups.Clear();
+            data.PoleLadders.Clear();
+            data.PoleOrders.Clear();
+            SaveData();
+        }
+
         private void OnServerInitialized()
         {
             origSatelliteRequirePowerplant = ConVar.Satellite.require_powerplant;
@@ -741,6 +849,9 @@ namespace Oxide.Plugins
             SpawnOffice();
             SpawnBoombox();
             SpawnGaragePumps();
+            SyncPoleHookups();
+            FitPaidOrders();
+            CreateOfficePhone();
 
             // Faults on services Cobalt has shelved are moot — drop them before markers spawn.
             for (int i = data.Faults.Count - 1; i >= 0; i--)
@@ -765,6 +876,8 @@ namespace Oxide.Plugins
         private void Unload()
         {
             RestorePoleOutput();
+            KillCrews();
+            DestroyOfficePhone();
             tickTimer?.Destroy();
             resupplyBreakTimer?.Destroy();
             SaveData();
@@ -774,6 +887,7 @@ namespace Oxide.Plugins
             RunConVar("satellite.free_power", origSatelliteFreePower ? "true" : "false");
             RunConVar("satellite.free_fuel", origSatelliteFreeFuel ? "true" : "false");
             ApplyPoleMultiplier(false);
+            poleServiceEnergy = 0;
             int realStage = Manager != null ? Manager.CurrentStage : 0;
             foreach (var pair in serviceEntities)
                 ApplyStage(pair.Value, realStage);
@@ -828,6 +942,8 @@ namespace Oxide.Plugins
         {
             if (clerk != null && entity == clerk) return true;     // clerk is invincible
             if (boombox != null && entity == boombox) return true; // playing decays it otherwise
+            if (IsPoleLadder(entity)) return true;
+            if (IsCrewEntity(entity)) return true;
             var pump = entity as WaterCatcher;
             if (pump != null && garagePumps.Contains(pump)) return true;
             var machine = entity as NPCVendingMachine;
@@ -847,6 +963,7 @@ namespace Oxide.Plugins
         {
             if (entity == null) return null;
             if (boombox != null && entity == boombox) return false;
+            if (IsPoleLadder(entity)) return false; // nothing under it but the pole
             var groundedMachine = entity as NPCVendingMachine;
             if (groundedMachine != null &&
                 (grocers.Contains(groundedMachine) || stationGrocers.Contains(groundedMachine))) return false;
@@ -1178,6 +1295,47 @@ namespace Oxide.Plugins
             catch (Exception e) { PrintWarning($"Pole output multiplier failed: {e.Message}"); }
         }
 
+        // Since that same update a pole also ignores the stage it is handed: it reads the
+        // power plant's fuse count, so force-powering the grid leaves every pole at 0
+        // unless real fuses are in. While Electricity is active the plugin feeds the
+        // poles itself: it sets the energy each pole reports and answers OnOutputUpdate
+        // for it, pushing that energy down every connected wire (split across the used
+        // outputs, as vanilla does). Real fuses still win if they'd give more.
+        private int poleServiceEnergy;   // 0 = poles run vanilla
+
+        private int PoleEnergy() =>
+            Mathf.Max(poleServiceEnergy, PowergridManager.Server_GetCurrentPowerlineEnergy());
+
+        private void FeedPole(PowergridIOAccessPoint pole)
+        {
+            int energy = PoleEnergy();
+            if (pole.currentEnergy == energy && pole.HasFlag(BaseEntity.Flags.Reserved8)) return;
+            pole.currentEnergy = energy;
+            using (var scope = pole.StartSetFlags(BaseEntity.FlagsUpdateMode.SendNetworkUpdate_Flags))
+                scope.Set(BaseEntity.Flags.Reserved8, true);
+            pole.MarkDirtyForceUpdateOutputs();
+        }
+
+        private object OnOutputUpdate(IOEntity entity)
+        {
+            if (poleServiceEnergy <= 0) return null;
+            var pole = entity as PowergridIOAccessPoint;
+            if (pole == null) return null;
+
+            int used = 0;
+            foreach (var slot in pole.outputs)
+                if (slot.connectedTo.Get() != null) used++;
+            if (used == 0) return null;
+
+            int share = PoleEnergy() / used;
+            foreach (var slot in pole.outputs)
+            {
+                var consumer = slot.connectedTo.Get();
+                if (consumer != null) consumer.UpdateFromInput(share, slot.connectedToSlot);
+            }
+            return true;
+        }
+
         private void RestorePoleOutput()
         {
             if (origPoleBasePower != null) Powergrid.powerlineBasePowerOutput = origPoleBasePower.Value;
@@ -1190,7 +1348,12 @@ namespace Oxide.Plugins
             float level = FaultLevel(service);
 
             if (service == "electricity")
+            {
                 ApplyPoleMultiplier(level >= 1f && config.PoleOutputMultiplier > 1f);
+                poleServiceEnergy = level >= 1f ? Powergrid.powerlineMaxPowerOutput
+                    : level > 0f ? (Powergrid.powerlineBasePowerOutput + Powergrid.powerlineMaxPowerOutput) / 2
+                    : 0;
+            }
 
             List<IPowergridEntity> list;
             if (serviceEntities.TryGetValue(service, out list))
@@ -1275,7 +1438,10 @@ namespace Oxide.Plugins
         private void DeactivateService(string service)
         {
             if (service == "electricity")
+            {
                 ApplyPoleMultiplier(false);
+                poleServiceEnergy = 0;
+            }
 
             List<IPowergridEntity> list;
             if (serviceEntities.TryGetValue(service, out list) && Manager != null)
@@ -1362,6 +1528,12 @@ namespace Oxide.Plugins
                 if (entity == null || entity.IsDestroyed)
                 {
                     entities.RemoveAt(i);
+                    continue;
+                }
+                var pole = entity as PowergridIOAccessPoint;
+                if (pole != null && poleServiceEnergy > 0)
+                {
+                    FeedPole(pole);
                     continue;
                 }
                 try { ipe.Server_OnPowergridStageChanged(stage); }
@@ -2139,11 +2311,16 @@ namespace Oxide.Plugins
         // Same outfit convention as the RustQuests traders: "shortname" or "shortname@skinId".
         private void DressClerk()
         {
-            if (clerk == null || config.ClerkOutfit == null) return;
-            var wear = clerk.inventory?.containerWear;
+            if (clerk != null) DressNpc(clerk, config.ClerkOutfit, "Clerk");
+        }
+
+        private void DressNpc(BasePlayer npc, List<string> outfit, string who)
+        {
+            if (npc == null || outfit == null) return;
+            var wear = npc.inventory?.containerWear;
             if (wear == null) return;
 
-            foreach (var entry in config.ClerkOutfit)
+            foreach (var entry in outfit)
             {
                 string shortname = entry;
                 ulong skin = 0;
@@ -2154,10 +2331,10 @@ namespace Oxide.Plugins
                     ulong.TryParse(entry.Substring(at + 1), out skin);
                 }
                 var item = ItemManager.CreateByName(shortname, 1, skin);
-                if (item == null) { PrintWarning($"Clerk outfit item '{shortname}' unknown — skipped."); continue; }
+                if (item == null) { PrintWarning($"{who} outfit item '{shortname}' unknown — skipped."); continue; }
                 if (!item.MoveToContainer(wear)) item.Remove();
             }
-            clerk.SendNetworkUpdate();
+            npc.SendNetworkUpdate();
         }
 
         // Pin the clerk exactly where the admin placed him: the scientist prefab's nav agent
@@ -2217,6 +2394,7 @@ namespace Oxide.Plugins
         private object CanLootEntity(BasePlayer player, StorageContainer container)
         {
             if (container == null) return null;
+            if (IsCrewEntity(container)) return false;
 
             // Drone terminal: offline while the service is down or faulted at all.
             if (container is MarketTerminal && !DroneOpen() &&
@@ -3269,9 +3447,9 @@ namespace Oxide.Plugins
         }
 
         // Settle a billing hold at the office: scrap fee, no payout, no bonus hours.
-        private void TryPayBill(BasePlayer player, FaultData fault)
+        private void TryPayBill(BasePlayer player, FaultData fault, int phoneFee = 0)
         {
-            int fee = BillingFee(fault);
+            int fee = BillingFee(fault) + phoneFee;
             var def = ItemManager.FindItemDefinition(ScrapShortname);
             if (def == null) return;
             if (fee > 0)
@@ -3332,6 +3510,857 @@ namespace Oxide.Plugins
 
         #endregion
 
+        #region Pole transformers (pay to fit a hookup to a plain pole)
+
+        // Every roadside pole is the same world prefab. On a fresh map the game fits a
+        // powergrid access point (the transformer and its IO ports) to some of them,
+        // spawned at the pole's own position and rotation. Spawning the same entity on
+        // a plain pole gives an identical hookup that rides in the map save and joins
+        // the Electricity service through the normal indexing path.
+        private const string PrefabPowerlinePath = "assets/prefabs/io/electric/generators/powergrid_powerline_io.static.prefab";
+        private const string PlainPoleName = "powerline_pole_a_climbable";
+
+        private Transform FindNearestPole(Vector3 position, float range)
+        {
+            if (TerrainMeta.Path == null || TerrainMeta.Path.wires == null) return null;
+            Transform best = null;
+            float bestSqr = range * range;
+            foreach (var pair in TerrainMeta.Path.wires)
+            {
+                if (!pair.Key.Contains(PlainPoleName)) continue; // monument poles and pylons stay as they are
+                foreach (var node in pair.Value)
+                {
+                    if (node == null) continue;
+                    Vector3 offset = node.transform.position - position;
+                    if (Mathf.Abs(offset.y) > 15f) continue; // the pole is climbable; its origin is the base
+                    offset.y = 0f;
+                    if (offset.sqrMagnitude > bestSqr) continue;
+                    bestSqr = offset.sqrMagnitude;
+                    best = node.transform;
+                }
+            }
+            return best;
+        }
+
+        private PowergridIOAccessPoint HookupAt(Vector3 polePosition)
+        {
+            List<IPowergridEntity> list;
+            if (!serviceEntities.TryGetValue("electricity", out list)) return null;
+            foreach (var ipe in list)
+            {
+                var point = ipe as PowergridIOAccessPoint;
+                if (point == null || point.IsDestroyed) continue;
+                if ((point.transform.position - polePosition).sqrMagnitude < 1f) return point;
+            }
+            return null;
+        }
+
+        private static bool HookupExists(ulong netId) =>
+            BaseNetworkable.serverEntities.Find(new NetworkableId(netId)) is PowergridIOAccessPoint;
+
+        // The game's own transformer poles carry an invisible ladder, but it is part of
+        // the pole scenery and stripped from plain poles on the client too, so it can't
+        // be added. The crew leaves real ladders instead: two wooden ones up the side
+        // opposite the transformer, department property (no damage, no pickup).
+        private const string PrefabLadder = "assets/prefabs/building/ladder.wall.wood/ladder.wooden.wall.prefab";
+        private static readonly float[] PoleLadderHeights = { 1.6f, 4.72f }; // ladder centres; each is 3.13 m tall
+        private const float PoleLadderOffset = 0.21f;                        // pole radius + the ladder's own stand-off
+
+        private readonly HashSet<ulong> poleLadderIds = new HashSet<ulong>();
+
+        private bool IsPoleLadder(BaseEntity entity) =>
+            poleLadderIds.Count > 0 && entity is BaseLadder && entity.net != null && poleLadderIds.Contains(entity.net.ID.Value);
+
+        private object CanPickupEntity(BasePlayer player, BaseEntity entity) =>
+            IsPoleLadder(entity) ? (object)false : null;
+
+        private void SpawnPoleLadders(PowergridIOAccessPoint hookup)
+        {
+            if (!config.PoleHookupLadders) return;
+            var ids = new List<ulong>();
+            foreach (float height in PoleLadderHeights)
+            {
+                var ladder = GameManager.server.CreateEntity(PrefabLadder,
+                    hookup.transform.TransformPoint(new Vector3(0f, height, PoleLadderOffset)), hookup.transform.rotation);
+                if (ladder == null) continue;
+                ladder.Spawn();
+                ids.Add(ladder.net.ID.Value);
+                poleLadderIds.Add(ladder.net.ID.Value);
+            }
+            data.PoleLadders[hookup.net.ID.Value] = ids;
+        }
+
+        private void KillPoleLadders(ulong hookupId)
+        {
+            List<ulong> ids;
+            if (!data.PoleLadders.TryGetValue(hookupId, out ids)) return;
+            foreach (var id in ids)
+            {
+                poleLadderIds.Remove(id);
+                var ladder = BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BaseLadder;
+                if (ladder != null && !ladder.IsDestroyed) ladder.Kill();
+            }
+            data.PoleLadders.Remove(hookupId);
+        }
+
+        // Drops records of transformers that are gone (and their ladders), and puts
+        // ladders back on purchased poles that have none.
+        private void SyncPoleHookups()
+        {
+            bool changed = false;
+            foreach (var id in data.PoleLadders.Keys.Where(id => !data.PoleHookups.ContainsKey(id)).ToList())
+            {
+                KillPoleLadders(id);
+                changed = true;
+            }
+            foreach (var id in data.PoleHookups.Keys.ToList())
+            {
+                var hookup = BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as PowergridIOAccessPoint;
+                if (hookup == null)
+                {
+                    KillPoleLadders(id);
+                    data.PoleHookups.Remove(id);
+                    changed = true;
+                    continue;
+                }
+
+                List<ulong> ids;
+                bool standing = data.PoleLadders.TryGetValue(id, out ids) &&
+                                ids.Any(l => BaseNetworkable.serverEntities.Find(new NetworkableId(l)) is BaseLadder);
+                if (standing)
+                {
+                    foreach (var l in ids) poleLadderIds.Add(l);
+                }
+                else if (config.PoleHookupLadders)
+                {
+                    KillPoleLadders(id);
+                    SpawnPoleLadders(hookup);
+                    changed = true;
+                }
+            }
+            if (changed) SaveData();
+        }
+
+        // /pw pole files a work order for the pole the player stands at; nothing is built
+        // until it is paid at the office or over the phone line.
+        private void CmdPole(BasePlayer player, string[] args)
+        {
+            string sub = args.Length > 1 ? args[1].ToLower() : "";
+
+            if (sub == "remove")
+            {
+                if (!IsAdmin(player)) { ReplyRaw(player, "NoPermission"); return; }
+                var target = FindNearestPole(player.transform.position, config.PoleHookupRange);
+                var bought = target != null ? HookupAt(target.position) : null;
+                if (bought == null || !data.PoleHookups.Remove(bought.net.ID.Value))
+                {
+                    ReplyRaw(player, "PoleNotPurchased");
+                    return;
+                }
+                KillPoleLadders(bought.net.ID.Value);
+                SaveData();
+                bought.Kill();
+                ReplyRaw(player, "PoleRemoved");
+                return;
+            }
+
+            if (!config.PoleHookupEnabled) { Reply(player, "PoleDisabled"); return; }
+
+            ulong userId = (ulong)player.userID;
+            PoleOrder onFile;
+            data.PoleOrders.TryGetValue(userId, out onFile);
+
+            if (sub == "cancel")
+            {
+                if (onFile == null) { Reply(player, "PoleOrderNone"); return; }
+                if (onFile.Paid) { Reply(player, "PoleOrderBusy"); return; }
+                data.PoleOrders.Remove(userId);
+                SaveData();
+                Reply(player, "PoleOrderCancelled");
+                return;
+            }
+
+            if (onFile != null && onFile.Paid) { Reply(player, "PoleOrderBusy"); return; }
+
+            var pole = FindNearestPole(player.transform.position, config.PoleHookupRange);
+            if (pole == null)
+            {
+                if (onFile != null) ReplyOrderFiled(player, onFile);
+                else Reply(player, "PoleNoneNear");
+                return;
+            }
+            if (HookupAt(pole.position) != null) { Reply(player, "PoleHasHookup"); return; }
+            if (PolePaidByOther(pole.position, userId)) { Reply(player, "PoleOrderTaken"); return; }
+
+            if (config.PoleHookupMaxPerPlayer > 0)
+            {
+                SyncPoleHookups();
+                if (data.PoleHookups.Count(p => p.Value == userId) >= config.PoleHookupMaxPerPlayer)
+                {
+                    Reply(player, "PoleLimit", config.PoleHookupMaxPerPlayer);
+                    return;
+                }
+            }
+
+            var order = new PoleOrder { X = pole.position.x, Y = pole.position.y, Z = pole.position.z };
+            data.PoleOrders[userId] = order;
+            SaveData();
+            ReplyOrderFiled(player, order);
+        }
+
+        private void ReplyOrderFiled(BasePlayer player, PoleOrder order)
+        {
+            string byPhone = officePhone != null
+                ? Msg("PoleOrderPhone", player.UserIDString, officePhone.Controller.PhoneNumber, Mathf.Max(0, config.PhoneFee))
+                : "";
+            Reply(player, "PoleOrderFiled", MapHelper.PositionToString(order.Position), Mathf.Max(0, config.PoleHookupPrice), byPhone);
+        }
+
+        private bool PolePaidByOther(Vector3 polePosition, ulong userId)
+        {
+            foreach (var pair in data.PoleOrders)
+                if (pair.Value.Paid && pair.Key != userId && (pair.Value.Position - polePosition).sqrMagnitude < 2f)
+                    return true;
+            return false;
+        }
+
+        private void PayPoleOrder(BasePlayer player, int phoneFee)
+        {
+            ulong userId = (ulong)player.userID;
+            PoleOrder order;
+            if (!data.PoleOrders.TryGetValue(userId, out order)) { Reply(player, "PoleOrderNone"); return; }
+            if (order.Paid) { Reply(player, "PoleOrderBusy"); return; }
+
+            var pole = FindNearestPole(order.Position, 1.5f);
+            if (pole == null || HookupAt(pole.position) != null || PolePaidByOther(order.Position, userId))
+            {
+                data.PoleOrders.Remove(userId);
+                SaveData();
+                Reply(player, "PoleOrderTaken");
+                return;
+            }
+
+            int total = Mathf.Max(0, config.PoleHookupPrice) + phoneFee;
+            var def = ItemManager.FindItemDefinition(ScrapShortname);
+            if (def == null) return;
+            if (total > 0)
+            {
+                if (player.inventory.GetAmount(def.itemid) < total)
+                {
+                    Reply(player, "PoleOrderNeedScrap", total);
+                    return;
+                }
+                player.inventory.Take(null, def.itemid, total);
+            }
+
+            order.Paid = true;
+            SaveData();
+            DispatchCrew(player, order, total);
+        }
+
+        // The actual install: the transformer, its ladders, the buyer's record.
+        private void FitOrder(ulong userId, PoleOrder order)
+        {
+            data.PoleOrders.Remove(userId);
+            var buyer = BasePlayer.FindByID(userId);
+            int price = Mathf.Max(0, config.PoleHookupPrice);
+
+            var pole = FindNearestPole(order.Position, 1.5f);
+            PowergridIOAccessPoint hookup = null;
+            if (pole != null && HookupAt(pole.position) == null)
+            {
+                hookup = GameManager.server.CreateEntity(PrefabPowerlinePath, pole.position, pole.rotation) as PowergridIOAccessPoint;
+                if (hookup != null) hookup.Spawn();
+            }
+            if (hookup == null)
+            {
+                SaveData();
+                PrintWarning($"Could not fit the pole transformer ordered by {userId} at {order.Position}.");
+                if (buyer != null)
+                {
+                    var refund = price > 0 ? ItemManager.CreateByName(ScrapShortname, price) : null;
+                    if (refund != null) buyer.GiveItem(refund);
+                    Reply(buyer, "PoleFailed");
+                }
+                return;
+            }
+
+            data.PoleHookups[hookup.net.ID.Value] = userId;
+            SpawnPoleLadders(hookup);
+            SaveData();
+
+            // Index now rather than on the deferred spawn hook, so a second order on the
+            // same pole sees it, and push the current grid state so it's live at once.
+            IndexEntity(hookup);
+            if (lastActive.Contains("electricity")) ApplyService("electricity");
+            else ((IPowergridEntity)hookup).Server_OnPowergridStageChanged(Manager != null ? Manager.CurrentStage : 0);
+
+            Effect.server.Run(FxInstalled, hookup.transform.position + Vector3.up * 7.8f);
+            if (buyer != null) Reply(buyer, "PoleFitted", MapHelper.PositionToString(order.Position));
+            Interface.CallHook("OnPublicWorksPoleHookup", buyer, hookup, price);
+        }
+
+        // Orders paid before a reload or restart: the crew is gone, so finish the job.
+        private void FitPaidOrders()
+        {
+            foreach (var pair in data.PoleOrders.Where(p => p.Value.Paid).ToList())
+                FitOrder(pair.Key, pair.Value);
+        }
+
+        #endregion
+
+        #region Pole crew (the truck that drives out to fit a paid work order)
+
+        // A modular pickup with one worker spawns down the road, drives to the pole,
+        // the worker gets out for a while, the transformer appears, and they drive off.
+        // The truck is driven kinematically along the road's own path points; nothing
+        // about it is saved. A failsafe timer fits the order even if the truck never
+        // makes it (blocked road, despawn), so a paid order can't be lost.
+        private const string CrewTruckPrefab = "assets/content/vehicles/modularcar/car_chassis_2module.entity.prefab";
+        private const string FxInstalled = "assets/bundled/prefabs/fx/build/promote_metal.prefab";
+        private static readonly string[] CrewTruckModules = { "vehicle.1mod.cockpit.with.engine", "vehicle.1mod.flatbed" };
+        private static readonly string[] EnginePartItems = { "carburetor1", "crankshaft1", "piston1", "sparkplug1", "valve1" };
+        private const float CrewRoadClearance = 0.25f; // wheeled origins ride a little above the road points
+
+        private class CrewJob
+        {
+            public ulong UserId;
+            public PoleOrder Order;
+            public ModularCar Truck;
+            public BasePlayer Worker;
+            public BaseMountable Seat;
+            public CrewDriver Driver;
+            public Timer WorkTimer, Failsafe;
+            public bool Fitted;
+        }
+
+        private readonly List<CrewJob> crewJobs = new List<CrewJob>();
+
+        private bool IsCrewEntity(BaseEntity entity)
+        {
+            if (crewJobs.Count == 0 || entity == null) return false;
+            foreach (var job in crewJobs)
+            {
+                if (entity == job.Worker) return true;
+                for (var link = entity; link != null; link = link.GetParentEntity())
+                    if (link == job.Truck) return true;
+            }
+            return false;
+        }
+
+        // The truck is department property: nobody rides up front but the crew.
+        private object CanMountEntity(BasePlayer player, BaseMountable entity)
+        {
+            if (crewJobs.Count == 0 || !IsCrewEntity(entity)) return null;
+            foreach (var job in crewJobs)
+                if (player == job.Worker) return null;
+            return false;
+        }
+
+        private void DispatchCrew(BasePlayer player, PoleOrder order, int paid)
+        {
+            ulong userId = (ulong)player.userID;
+            List<Vector3> approach, depart;
+            ModularCar truck = null;
+            if (config.CrewEnabled && TryBuildCrewRoute(order.Position, out approach, out depart))
+            {
+                Vector3 facing = approach[1] - approach[0];
+                facing.y = 0f;
+                truck = GameManager.server.CreateEntity(CrewTruckPrefab, approach[0],
+                    facing.sqrMagnitude > 0.01f ? Quaternion.LookRotation(facing.normalized) : Quaternion.identity) as ModularCar;
+            }
+            else
+            {
+                approach = depart = null;
+            }
+
+            if (truck == null)
+            {
+                // No road to drive in on (or crews are switched off): fitted on the spot.
+                FitOrder(userId, order);
+                return;
+            }
+
+            truck.EnableSaving(false);
+            // The chassis prefab spawns with a random preset of modules; ours would
+            // stack on top of them.
+            truck.spawnSettings.useSpawnSettings = false;
+            truck.Spawn();
+            for (int socket = 0; socket < CrewTruckModules.Length; socket++)
+            {
+                var module = ItemManager.CreateByName(CrewTruckModules[socket]);
+                if (module != null && !truck.TryAddModule(module, socket)) module.Remove();
+            }
+
+            float speed = Mathf.Clamp(config.CrewSpeed, 3f, 20f);
+            float work = Mathf.Max(1f, config.CrewWorkSeconds);
+            float length = 0f;
+            for (int i = 1; i < approach.Count; i++) length += Vector3.Distance(approach[i - 1], approach[i]);
+            float eta = length / speed;
+
+            var job = new CrewJob { UserId = userId, Order = order, Truck = truck };
+            crewJobs.Add(job);
+            job.Driver = truck.gameObject.AddComponent<CrewDriver>();
+            job.Driver.Begin(this, job, approach, depart, speed);
+            // A beat later, so the module seats exist before the worker mounts.
+            timer.Once(1f, () => SpawnCrewWorker(job));
+            job.Failsafe = timer.Once(eta * 2f + work + 30f, () =>
+            {
+                FitCrewJob(job);
+                EndCrewJob(job);
+            });
+
+            Reply(player, "PoleCrewDispatched", paid, MapHelper.PositionToString(order.Position), Mathf.CeilToInt(eta + work));
+        }
+
+        // Follows the nearest road through the point closest to the pole: drive in from
+        // one side, carry on out the other. Returns false when no road passes the pole.
+        private bool TryBuildCrewRoute(Vector3 polePosition, out List<Vector3> approach, out List<Vector3> depart)
+        {
+            approach = new List<Vector3>();
+            depart = new List<Vector3>();
+            if (TerrainMeta.Path == null || TerrainMeta.Path.Roads == null) return false;
+
+            Vector3[] road = null;
+            int nearest = -1;
+            float bestSqr = 40f * 40f;
+            foreach (var path in TerrainMeta.Path.Roads)
+            {
+                var points = path != null && path.Path != null ? path.Path.Points : null;
+                if (points == null || points.Length < 2) continue;
+                for (int i = 0; i < points.Length; i++)
+                {
+                    Vector3 offset = points[i] - polePosition;
+                    offset.y = 0f;
+                    if (offset.sqrMagnitude >= bestSqr) continue;
+                    bestSqr = offset.sqrMagnitude;
+                    road = points;
+                    nearest = i;
+                }
+            }
+            if (road == null) return false;
+
+            float range = Mathf.Max(30f, config.CrewApproachDistance);
+            float behind, ahead;
+            int first = WalkRoad(road, nearest, -1, range, out behind);
+            int last = WalkRoad(road, nearest, 1, range, out ahead);
+
+            if (behind >= ahead)
+            {
+                for (int i = first; i <= nearest; i++) approach.Add(road[i]);
+                for (int i = nearest + 1; i <= last; i++) depart.Add(road[i]);
+            }
+            else
+            {
+                for (int i = last; i >= nearest; i--) approach.Add(road[i]);
+                for (int i = nearest - 1; i >= first; i--) depart.Add(road[i]);
+            }
+            if (approach.Count < 2) return false;
+
+            SnapToRoad(approach);
+            SnapToRoad(depart);
+            return true;
+        }
+
+        private static int WalkRoad(Vector3[] road, int from, int step, float range, out float walked)
+        {
+            walked = 0f;
+            int index = from;
+            while (index + step >= 0 && index + step < road.Length && walked < range)
+            {
+                walked += Vector3.Distance(road[index], road[index + step]);
+                index += step;
+            }
+            return index;
+        }
+
+        private static void SnapToRoad(List<Vector3> route)
+        {
+            for (int i = 0; i < route.Count; i++)
+            {
+                Vector3 point = route[i];
+                point.y = Mathf.Max(TerrainMeta.HeightMap.GetHeight(point), point.y) + CrewRoadClearance;
+                route[i] = point;
+            }
+        }
+
+        private void SpawnCrewWorker(CrewJob job)
+        {
+            if (!crewJobs.Contains(job) || job.Truck == null || job.Truck.IsDestroyed) return;
+
+            BaseMountable seat = null;
+            foreach (var point in job.Truck.allMountPoints)
+                if (point.isDriver && point.mountable != null && point.mountable.GetMounted() == null)
+                {
+                    seat = point.mountable;
+                    break;
+                }
+            if (seat == null) return; // the truck drives itself; the job still gets done
+
+            var worker = GameManager.server.CreateEntity(NpcPrefabFallback, job.Truck.transform.position + Vector3.up * 0.5f) as BasePlayer;
+            if (worker == null) return;
+            worker.enableSaving = false;
+            worker.Spawn();
+            worker.displayName = config.CrewName;
+            try
+            {
+                var brain = worker.GetComponent<BaseAIBrain>();
+                if (brain != null)
+                {
+                    brain.SetThinkMode(AIThinkMode.None);
+                    brain.SetEnabled(false);
+                }
+                worker.inventory?.Strip();
+            }
+            catch (Exception e) { PrintWarning($"Could not pacify the crew worker: {e.Message}"); }
+            DressNpc(worker, config.CrewOutfit, "Crew");
+
+            job.Worker = worker; // before mounting: CanMountEntity consults it
+            job.Seat = seat;
+            seat.MountPlayer(worker);
+            if (seat.GetMounted() != worker)
+            {
+                worker.Kill();
+                job.Worker = null;
+                return;
+            }
+            worker.transform.localPosition = Vector3.zero; // pin to the seat anchor
+            StartCrewEngine(job);
+        }
+
+        // Engine sound: a car wants working engine internals, fuel and a driver.
+        private void StartCrewEngine(CrewJob job)
+        {
+            try
+            {
+                foreach (var child in job.Truck.children)
+                {
+                    var engine = child as VehicleModuleEngine;
+                    if (engine == null) continue;
+                    foreach (var sub in engine.children)
+                    {
+                        var storage = sub as Rust.Modular.EngineStorage;
+                        if (storage == null || storage.inventory == null) continue;
+                        for (int slot = 0; slot < storage.inventory.capacity; slot++)
+                        {
+                            if (storage.inventory.GetSlot(slot) != null) continue;
+                            foreach (var partName in EnginePartItems)
+                            {
+                                var part = ItemManager.CreateByName(partName);
+                                if (part == null) continue;
+                                if (part.MoveToContainer(storage.inventory, slot)) break;
+                                part.Remove();
+                            }
+                        }
+                    }
+                }
+                var tank = (job.Truck.GetFuelSystem() as EntityFuelSystem)?.GetFuelContainer();
+                if (tank != null && tank.inventory != null && tank.inventory.itemList.Count == 0)
+                {
+                    var fuel = ItemManager.CreateByName("lowgradefuel", 50);
+                    if (fuel != null && !fuel.MoveToContainer(tank.inventory)) fuel.Remove();
+                }
+                if (job.Worker != null) job.Truck.engineController.TryStartEngine(job.Worker);
+            }
+            catch (Exception e) { PrintWarning($"Crew truck engine start failed: {e.Message}"); }
+        }
+
+        private void OnCrewArrived(CrewJob job)
+        {
+            var worker = job.Worker;
+            if (worker != null && !worker.IsDestroyed && job.Truck != null && !job.Truck.IsDestroyed)
+            {
+                if (job.Seat != null && job.Seat.GetMounted() == worker) job.Seat.DismountPlayer(worker, true);
+
+                // Stand between the truck and the pole, facing the pole.
+                Vector3 toTruck = job.Truck.transform.position - job.Order.Position;
+                toTruck.y = 0f;
+                Vector3 side = toTruck.sqrMagnitude > 0.01f ? toTruck.normalized : Vector3.forward;
+                Vector3 stand = job.Order.Position + side * 1.2f;
+                stand.y = TerrainMeta.HeightMap.GetHeight(stand);
+                try
+                {
+                    var npc = worker as NPCPlayer;
+                    if (npc != null && npc.NavAgent != null) npc.NavAgent.enabled = false;
+                }
+                catch { }
+                float yaw = Quaternion.LookRotation(-side).eulerAngles.y;
+                worker.ServerPosition = stand;
+                worker.viewAngles = new Vector3(0f, yaw, 0f);
+                worker.ServerRotation = Quaternion.Euler(0f, yaw, 0f);
+                worker.SendNetworkUpdateImmediate();
+            }
+
+            job.WorkTimer = timer.Once(Mathf.Max(1f, config.CrewWorkSeconds), () =>
+            {
+                FitCrewJob(job);
+                if (worker != null && !worker.IsDestroyed && job.Seat != null && job.Truck != null && !job.Truck.IsDestroyed)
+                {
+                    job.Seat.MountPlayer(worker);
+                    worker.transform.localPosition = Vector3.zero;
+                    try { job.Truck.engineController.TryStartEngine(worker); } catch { }
+                }
+                if (job.Driver != null) job.Driver.Depart();
+            });
+        }
+
+        private void FitCrewJob(CrewJob job)
+        {
+            if (job.Fitted) return;
+            job.Fitted = true;
+            PoleOrder order;
+            if (data.PoleOrders.TryGetValue(job.UserId, out order) && order.Paid) FitOrder(job.UserId, order);
+        }
+
+        private void EndCrewJob(CrewJob job)
+        {
+            job.WorkTimer?.Destroy();
+            job.Failsafe?.Destroy();
+            crewJobs.Remove(job);
+            if (job.Worker != null && !job.Worker.IsDestroyed) job.Worker.Kill();
+            if (job.Truck != null && !job.Truck.IsDestroyed) job.Truck.Kill();
+        }
+
+        // Unload: the trucks go; their paid orders stay on file and are fitted on load.
+        private void KillCrews()
+        {
+            foreach (var job in crewJobs.ToList()) EndCrewJob(job);
+        }
+
+        private class CrewDriver : MonoBehaviour
+        {
+            private const float WaypointRadius = 3f;
+            private static readonly int ObstacleMask = LayerMask.GetMask("Vehicle_World", "Player (Server)", "Deployed");
+
+            private PublicWorks plugin;
+            private CrewJob job;
+            private Rigidbody body;
+            private List<Vector3> route, departRoute;
+            private int index;
+            private float speed;
+            private bool parked, leaving;
+
+            public void Begin(PublicWorks owner, CrewJob crewJob, List<Vector3> approach, List<Vector3> depart, float metersPerSecond)
+            {
+                plugin = owner;
+                job = crewJob;
+                route = approach;
+                departRoute = depart;
+                speed = metersPerSecond;
+                body = job.Truck.rigidBody;
+                if (body != null) body.isKinematic = true;
+            }
+
+            public void Depart()
+            {
+                route = departRoute;
+                index = 0;
+                leaving = true;
+                parked = false;
+            }
+
+            private void FixedUpdate()
+            {
+                if (parked || plugin == null || job == null || job.Truck == null || job.Truck.IsDestroyed) return;
+                try
+                {
+                    if (index < route.Count)
+                    {
+                        // Kinematic driving feels no obstacles — hold rather than plow
+                        // through a player or a wreck; the job's failsafe covers a jam.
+                        if (!LaneClear(transform.position, route[index])) return;
+                        if (StepToward(route[index], index == route.Count - 1 && !leaving ? 1.5f : WaypointRadius)) index++;
+                        if (index < route.Count) return;
+                    }
+
+                    parked = true;
+                    if (leaving) plugin.EndCrewJob(job);
+                    else plugin.OnCrewArrived(job);
+                }
+                catch (Exception e)
+                {
+                    parked = true;
+                    plugin.PrintWarning($"Crew truck stopped: {e.Message}");
+                }
+            }
+
+            private bool LaneClear(Vector3 position, Vector3 target)
+            {
+                Vector3 direction = target - position;
+                direction.y = 0f;
+                float distance = direction.magnitude;
+                if (distance < 0.5f) return true;
+                direction /= distance;
+                var hits = Physics.SphereCastAll(position + Vector3.up * 0.8f, 1.1f, direction, Mathf.Min(distance, 5f), ObstacleMask);
+                foreach (var hit in hits)
+                {
+                    var entity = hit.GetEntity();
+                    if (entity == null || plugin.IsCrewEntity(entity)) continue;
+                    var rider = entity as BasePlayer;
+                    if (rider != null && rider.GetMountedVehicle() == job.Truck) continue;
+                    return false;
+                }
+                return true;
+            }
+
+            // Kinematic step along the road; true once within arriveAt of the target.
+            // MovePosition/MoveRotation rather than raw transform writes, so clients
+            // interpolate the motion.
+            private bool StepToward(Vector3 target, float arriveAt)
+            {
+                Vector3 position = transform.position;
+                Vector3 toward = target - position;
+                float flatSqr = toward.x * toward.x + toward.z * toward.z;
+                if (flatSqr < arriveAt * arriveAt) return true;
+
+                Vector3 next = Vector3.MoveTowards(position, target, speed * Time.fixedDeltaTime);
+                Quaternion rotation = transform.rotation;
+                if (flatSqr > 0.25f)
+                {
+                    // Pitch with the road, never roll.
+                    Vector3 euler = Quaternion.LookRotation(toward.normalized).eulerAngles;
+                    euler.z = 0f;
+                    rotation = Quaternion.Slerp(rotation, Quaternion.Euler(euler), Time.fixedDeltaTime * 3f);
+                }
+                if (body != null)
+                {
+                    if (body.IsSleeping()) body.WakeUp();
+                    body.MovePosition(next);
+                    body.MoveRotation(rotation);
+                }
+                else
+                {
+                    transform.position = next;
+                    transform.rotation = rotation;
+                }
+                return false;
+            }
+
+            private void OnDestroy()
+            {
+                if (body != null) body.isKinematic = false;
+            }
+        }
+
+        #endregion
+
+        #region Office phone line
+
+        // A hidden telephone backs the office number: OnPhoneDial only fires for numbers
+        // registered with the TelephoneManager, so the number must belong to a real
+        // PhoneController. Calling it opens the services panel wherever the caller is,
+        // with the convenience fee on every payment.
+        private const string TelephonePrefab = "assets/prefabs/voiceaudio/telephone/telephone.deployed.prefab";
+        private Telephone officePhone;
+        private Timer phoneWatchdog;
+
+        private void CreateOfficePhone()
+        {
+            if (!config.PhoneEnabled) return;
+
+            var phone = GameManager.server.CreateEntity(TelephonePrefab, new Vector3(0f, -1000f, 0f), Quaternion.identity) as Telephone;
+            if (phone == null)
+            {
+                PrintError("Could not create the hidden office telephone — the phone line is unavailable.");
+                return;
+            }
+            phone.EnableSaving(false);
+            phone.Spawn();
+            if (phone.Controller == null)
+            {
+                PrintError("The hidden office telephone has no phone controller — the phone line is unavailable.");
+                phone.Kill();
+                return;
+            }
+            officePhone = phone;
+
+            // Spawning auto-assigned a random number; swap in the configured one unless
+            // another phone already owns it. The dial pad only sends 8-digit numbers.
+            int desired = config.PhoneNumber;
+            if (desired < TelephoneManager.MinPhoneNumber || desired > TelephoneManager.MaxPhoneNumber)
+            {
+                PrintWarning($"Configured office phone number {desired} is not 8 digits — using 55596757.");
+                desired = 55596757;
+            }
+            var holder = TelephoneManager.GetTelephone(desired);
+            if (holder != null && !ReferenceEquals(holder, phone.Controller))
+            {
+                PrintWarning($"Office phone number {desired} is already taken by another phone — keeping {phone.Controller.PhoneNumber}. Change it in the config.");
+            }
+            else
+            {
+                TelephoneManager.DeregisterTelephone(phone.Controller);
+                phone.Controller.PhoneNumber = desired;
+                TelephoneManager.RegisterTelephone(phone.Controller);
+            }
+            phone.Controller.PhoneName = config.PhoneName;
+            phone.SendNetworkUpdate();
+            Puts($"Office phone line open: {phone.Controller.PhoneNumber} (\"{config.PhoneName}\")");
+
+            // The registry removes by number, blindly, so another phone's cleanup can
+            // wipe this registration, and the hidden entity itself can be culled.
+            phoneWatchdog?.Destroy();
+            phoneWatchdog = timer.Every(15f, EnsureOfficePhone);
+        }
+
+        private void EnsureOfficePhone()
+        {
+            if (officePhone == null || officePhone.IsDestroyed || officePhone.Controller == null)
+            {
+                officePhone = null;
+                CreateOfficePhone();
+                return;
+            }
+            var controller = officePhone.Controller;
+            if (string.IsNullOrEmpty(controller.PhoneName))
+            {
+                // An empty name hides the entry from the phone directory.
+                controller.PhoneName = config.PhoneName;
+                officePhone.SendNetworkUpdate();
+            }
+            if (TelephoneManager.GetTelephone(controller.PhoneNumber) == null)
+            {
+                TelephoneManager.RegisterTelephone(controller);
+                officePhone.SendNetworkUpdate();
+            }
+        }
+
+        private void DestroyOfficePhone()
+        {
+            phoneWatchdog?.Destroy();
+            phoneWatchdog = null;
+            if (officePhone != null && !officePhone.IsDestroyed)
+            {
+                if (officePhone.Controller != null)
+                {
+                    // Deregister now and zero the number: the entity's deferred destroy
+                    // deregisters again by number, which would otherwise wipe the
+                    // registration of the phone a reload creates in the meantime.
+                    TelephoneManager.DeregisterTelephone(officePhone.Controller);
+                    officePhone.Controller.PhoneNumber = 0;
+                }
+                officePhone.Kill();
+            }
+            officePhone = null;
+        }
+
+        private object OnPhoneDial(PhoneController callingPhone, PhoneController receiverPhone, BasePlayer player)
+        {
+            if (officePhone == null || receiverPhone == null || !ReferenceEquals(receiverPhone, officePhone.Controller))
+                return null;
+
+            // Always cancel the vanilla call to the office line; there's nobody to pick up.
+            if (player == null) return true;
+
+            ShowPanel(player, true, true);
+            // Hang up and release the phone, so the vanilla phone screen closes under the panel.
+            callingPhone.ServerHangUp();
+            callingPhone.ClearCurrentUser();
+            return true;
+        }
+
+        #endregion
+
         #region Purchases
 
         private int GetScrap(BasePlayer player)
@@ -3340,7 +4369,7 @@ namespace Oxide.Plugins
             return def == null ? 0 : player.inventory.GetAmount(def.itemid);
         }
 
-        private bool TryPurchase(BasePlayer player, string serviceKey)
+        private bool TryPurchase(BasePlayer player, string serviceKey, int phoneFee = 0)
         {
             if (!IsService(serviceKey)) return false;
             if (IsDisabled(serviceKey)) { Reply(player, "ServiceNotEssential"); return false; }
@@ -3356,13 +4385,15 @@ namespace Oxide.Plugins
 
             var def = ItemManager.FindItemDefinition(ScrapShortname);
             if (def == null) return false;
-            if (player.inventory.GetAmount(def.itemid) < config.PricePerDay)
+            int total = config.PricePerDay + phoneFee;
+            if (player.inventory.GetAmount(def.itemid) < total)
             {
-                Reply(player, "NeedScrap", config.PricePerDay, LabelFor(serviceKey, player.UserIDString));
+                if (phoneFee > 0) Reply(player, "NeedScrapTotal", total, config.PricePerDay, phoneFee);
+                else Reply(player, "NeedScrap", config.PricePerDay, LabelFor(serviceKey, player.UserIDString));
                 return false;
             }
 
-            player.inventory.Take(null, def.itemid, config.PricePerDay);
+            player.inventory.Take(null, def.itemid, total);
             data.Banked[serviceKey] = banked + deposit;
             warnLevel[serviceKey] = 0;
             SaveData();
@@ -3416,6 +4447,14 @@ namespace Oxide.Plugins
                     Reply(player, "OfficeAt", MapHelper.PositionToString(clerk.transform.position));
                 else
                     Reply(player, "OfficeMissing");
+                if (officePhone != null)
+                    Reply(player, "PhoneHint", officePhone.Controller.PhoneNumber, Mathf.Max(0, config.PhoneFee));
+                return;
+            }
+
+            if (args[0].ToLower() == "pole")
+            {
+                CmdPole(player, args);
                 return;
             }
 
@@ -3796,16 +4835,29 @@ namespace Oxide.Plugins
             switch (arg.GetString(0).ToLower())
             {
                 case "close":
-                    if (player != null) CuiHelper.DestroyUi(player, UiPanelName);
+                    if (player != null)
+                    {
+                        phoneSessions.Remove((ulong)player.userID);
+                        CuiHelper.DestroyUi(player, UiPanelName);
+                    }
                     return;
 
                 case "buy":
                 {
                     if (player == null) return;
-                    // Must be at the office (admins exempt) — the CUI only opens there, but re-check server-side.
-                    if (!IsAdmin(player) && !AtOffice(player)) return;
-                    TryPurchase(player, arg.GetString(1));
-                    ShowPanel(player);
+                    // Must be at the office or on the phone line (admins exempt) — the CUI only opens there, but re-check server-side.
+                    if (!CanTransact(player)) return;
+                    TryPurchase(player, arg.GetString(1), PhoneFee(player));
+                    RefreshPanel(player);
+                    return;
+                }
+
+                case "order":
+                {
+                    if (player == null) return;
+                    if (!CanTransact(player)) return;
+                    PayPoleOrder(player, PhoneFee(player));
+                    RefreshPanel(player);
                     return;
                 }
 
@@ -3835,11 +4887,11 @@ namespace Oxide.Plugins
                 case "bill":
                 {
                     if (player == null) return;
-                    if (!IsAdmin(player) && !AtOffice(player)) return;
+                    if (!CanTransact(player)) return;
                     var fault = GetFault(ProtectionKey);
                     if (fault == null) Reply(player, "BillNoFault");
-                    else TryPayBill(player, fault);
-                    ShowPanel(player);
+                    else TryPayBill(player, fault, PhoneFee(player));
+                    RefreshPanel(player);
                     return;
                 }
             }
@@ -3869,8 +4921,24 @@ namespace Oxide.Plugins
                 : Msg("OfficeHintGrid", userId, grid);
         }
 
-        private void ShowPanel(BasePlayer player, bool interactive = true)
+        // Players with the panel open over the office phone line: they may pay from
+        // anywhere, with the convenience fee on top of each payment.
+        private readonly HashSet<ulong> phoneSessions = new HashSet<ulong>();
+
+        private int PhoneFee(BasePlayer player) =>
+            phoneSessions.Contains((ulong)player.userID) ? Mathf.Max(0, config.PhoneFee) : 0;
+
+        private bool CanTransact(BasePlayer player) =>
+            IsAdmin(player) || AtOffice(player) || phoneSessions.Contains((ulong)player.userID);
+
+        private void RefreshPanel(BasePlayer player) =>
+            ShowPanel(player, true, phoneSessions.Contains((ulong)player.userID));
+
+        private void ShowPanel(BasePlayer player, bool interactive = true, bool phone = false)
         {
+            if (phone) phoneSessions.Add((ulong)player.userID);
+            else phoneSessions.Remove((ulong)player.userID);
+
             CuiHelper.DestroyUi(player, UiPanelName);
             var ui = new CuiElementContainer();
 
@@ -3889,7 +4957,7 @@ namespace Oxide.Plugins
             }, panel);
             ui.Add(new CuiLabel
             {
-                Text = { Text = Msg("UiSubtitle", uid, config.PricePerDay), FontSize = 11, Align = TextAnchor.MiddleCenter, Color = ColDim },
+                Text = { Text = phone ? Msg("UiSubtitlePhone", uid, config.PricePerDay, Mathf.Max(0, config.PhoneFee)) : Msg("UiSubtitle", uid, config.PricePerDay), FontSize = 11, Align = TextAnchor.MiddleCenter, Color = ColDim },
                 RectTransform = { AnchorMin = "0 0.895", AnchorMax = "1 0.935" }
             }, panel);
             ui.Add(new CuiButton
@@ -3899,10 +4967,12 @@ namespace Oxide.Plugins
                 RectTransform = { AnchorMin = "0.93 0.945", AnchorMax = "0.985 0.99" }
             }, panel);
 
-            // Nine rows between the subtitle (0.885) and the footer (0.105): 9 x 0.085
-            // bottoms out at 0.12, the same clearance eight rows had at 0.095.
+            // The rows share the band between the subtitle (0.885) and the note line
+            // (0.145): nine services, plus one more when the player has a work order.
+            PoleOrder order;
+            data.PoleOrders.TryGetValue((ulong)player.userID, out order);
             float top = 0.885f;
-            float rowH = 0.085f;
+            float rowH = 0.74f / (ServiceKeys.Length + (order != null ? 1 : 0));
             float burnNow = BurnRate();
             for (int i = 0; i < ServiceKeys.Length; i++)
             {
@@ -3982,9 +5052,10 @@ namespace Oxide.Plugins
                 {
                     // Cobalt isn't selling this one: no gauge, no price, no button.
                 }
-                else if (!interactive)
+                else if (!interactive || (phone && fault != null && key != ProtectionKey))
                 {
-                    // Status view from afar: the button slot shows where the fault is instead.
+                    // Status view from afar (repair contracts are handed out in person,
+                    // not over the phone): the button slot shows where the fault is instead.
                     ui.Add(new CuiLabel
                     {
                         Text =
@@ -4028,6 +5099,62 @@ namespace Oxide.Plugins
                     }, panel);
                 }
             }
+
+            if (order != null)
+            {
+                float oy1 = top - (ServiceKeys.Length + 1) * rowH + 0.008f;
+                float oy2 = top - ServiceKeys.Length * rowH;
+                string grid = MapHelper.PositionToString(order.Position);
+                int orderPrice = Mathf.Max(0, config.PoleHookupPrice);
+
+                ui.Add(new CuiPanel
+                {
+                    Image = { Color = ColRow },
+                    RectTransform = { AnchorMin = $"0.03 {oy1}", AnchorMax = $"0.97 {oy2}" }
+                }, panel);
+                ui.Add(new CuiPanel
+                {
+                    Image = { Color = order.Paid ? ColActive : ColFault },
+                    RectTransform = { AnchorMin = $"0.045 {oy1 + 0.028f}", AnchorMax = $"0.062 {oy2 - 0.028f}" }
+                }, panel);
+                ui.Add(new CuiLabel
+                {
+                    Text = { Text = Msg("UiOrderLabel", uid), FontSize = 13, Align = TextAnchor.MiddleLeft, Color = ColText },
+                    RectTransform = { AnchorMin = $"0.08 {oy1 + (oy2 - oy1) * 0.45f}", AnchorMax = $"0.78 {oy2}" }
+                }, panel);
+                ui.Add(new CuiLabel
+                {
+                    Text = { Text = Msg("UiOrderDesc", uid, grid), FontSize = 9, Align = TextAnchor.UpperLeft, Color = ColDim },
+                    RectTransform = { AnchorMin = $"0.08 {oy1}", AnchorMax = $"0.78 {oy1 + (oy2 - oy1) * 0.48f}" }
+                }, panel);
+                if (interactive && !order.Paid)
+                {
+                    ui.Add(new CuiButton
+                    {
+                        Button = { Color = ColActive, Command = "pw.cmd order" },
+                        Text = { Text = Msg("UiOrderPay", uid, orderPrice), FontSize = 11, Align = TextAnchor.MiddleCenter, Color = ColText },
+                        RectTransform = { AnchorMin = $"0.80 {oy1 + 0.012f}", AnchorMax = $"0.955 {oy2 - 0.012f}" }
+                    }, panel);
+                }
+                else
+                {
+                    ui.Add(new CuiLabel
+                    {
+                        Text =
+                        {
+                            Text = order.Paid ? Msg("UiOrderCrew", uid) : orderPrice.ToString(),
+                            FontSize = 10, Align = TextAnchor.MiddleCenter, Color = order.Paid ? "0.55 0.83 0.35 1" : ColDim
+                        },
+                        RectTransform = { AnchorMin = $"0.80 {oy1 + 0.012f}", AnchorMax = $"0.955 {oy2 - 0.012f}" }
+                    }, panel);
+                }
+            }
+
+            ui.Add(new CuiLabel
+            {
+                Text = { Text = Msg("UiPoleNote", uid), FontSize = 9, Align = TextAnchor.MiddleCenter, Color = ColDim },
+                RectTransform = { AnchorMin = "0 0.108", AnchorMax = "1 0.14" }
+            }, panel);
 
             ui.Add(new CuiLabel
             {

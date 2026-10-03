@@ -5,6 +5,18 @@ All notable changes to PublicWorks are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.10.0] - 2026-10-03
+
+### Added
+- Pole transformers: a player standing next to a plain roadside power pole files a work order with `/pw pole`, pays it at the office or by phone (250 scrap and one per player per wipe by default), and a crew truck drives out to fit a transformer to the pole. The result is the same public hookup the game puts on its own transformer poles, follows the Electricity service, survives restarts and goes away on a map wipe. The crew leaves two indestructible wooden ladders up the pole so the ports can be reached. Admins can take a purchased one down with `/pw pole remove`.
+- Office phone line: dial 5559-6757 ("Public Works Office" in the directory) from any telephone to open the services panel from afar. Each payment made by phone carries a convenience fee (10 scrap by default). Repair contracts are still handed out in person.
+- The services panel shows the player's work order as an extra row, and a one-line note that pole transformers read 0 on the wire tool.
+- Config: `Pole transformers: ...` (enable switch, price, per-player limit, reach, ladders, crew truck on/off, approach distance, speed, work time, worker name and outfit) and `Office phone line: ...` (enable switch, number, directory name, fee).
+- Hook `OnPublicWorksPoleHookup(BasePlayer player, PowergridIOAccessPoint hookup, int scrap)` for other plugins.
+
+### Fixed
+- Roadside poles output power again while the Electricity service is paid. Since the September 3, 2026 Rust update (build 2633.288) a pole takes its output from the number of heavy fuses in the power plant and ignores the stage the plugin forces, so every pole sat at 0 unless real fuses were in. The plugin now feeds the poles directly: full service gives the pole maximum (times the output multiplier), a minor fault gives half, and real fuses still win if they would give more. The wire tool readout on a pole still shows 0 with no fuses in the plant; the power is delivered.
+
 ## [2.9.0] - 2026-09-27
 
 ### Added
