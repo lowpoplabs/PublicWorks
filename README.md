@@ -444,9 +444,39 @@ MIT — see [LICENSE](LICENSE).
 
 - `OnPublicWorksRepair(BasePlayer fixer, string service, bool major)`: a player finished a repair contract (not the crew auto-fix).
 - `OnPublicWorksPurchase(BasePlayer player, string service, int scrap)`: a player paid for a day of a service.
+- `OnPublicWorksBillPaid(BasePlayer player, string ownerPlugin, string key, int scrap)`: a player paid a bill another plugin registered with the office.
+- `OnPublicWorksReady()`: Public Works finished loading; register bills now.
 - `OnPublicWorksPoleHookup(BasePlayer player, PowergridIOAccessPoint hookup, int scrap)`: the crew fitted a transformer a player paid for. `player` is null if the buyer has logged off by then.
 
 Cobalt Papers Please listens to both and credits the player with standing.
+
+## Billing interface for other plugins (v2.11)
+
+The office can be the payment desk for other plugins. A plugin registers a bill and it
+appears as a row on the panel's **MY ACCOUNTS** page, at the clerk and over the phone
+line (with the convenience fee). Public Works takes the scrap and tells the plugin.
+
+```csharp
+[PluginReference] private Plugin PublicWorks;
+
+private void OnServerInitialized() => PublicWorks?.Call("RegisterBillable", this, "locker");
+private void OnPublicWorksReady() => PublicWorks?.Call("RegisterBillable", this, "locker");
+
+// What this player's row shows, or null for no row. All keys but Label are optional.
+private Dictionary<string, object> PublicWorksBillQuery(BasePlayer player, string key) =>
+    new Dictionary<string, object>
+    {
+        ["Label"] = "Public locker", ["Description"] = "Your locker at every monument",
+        ["Status"] = "2d 4h left", ["Price"] = 50, ["Button"] = "+1 DAY", ["Active"] = true
+    };
+
+// The player paid `scrap`. Return false to refuse; the office refunds it.
+private object PublicWorksBillPaid(BasePlayer player, string key, int scrap) => true;
+```
+
+- `RegisterBillable(Plugin owner, string key)` / `UnregisterBillable(Plugin owner, string key)`. Keys have no spaces. Registrations go when either plugin unloads; `OnPublicWorksReady` fires each time Public Works finishes loading, so register again there.
+- `GetOfficePhoneNumber()` returns the phone line's number (0 if off) and `GetOfficeGrid()` the office's map grid, for telling a customer where to pay.
+- `Price` 0 shows the row without a button. The price is read again at the moment of payment. The page shows up to nine rows.
 
 ## Compatibility notes
 

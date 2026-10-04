@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("PublicWorks", "LowPopLabs", "2.10.0")]
+    [Info("PublicWorks", "LowPopLabs", "2.11.0")]
     [Description("A Public Works office: pay a clerk NPC scrap to keep island utilities running — power, water, gas, markets, garages, airport, internet, free trains, and Cobalt protection (reactive-only patrol heli & Bradley). Random faults break out at monuments; players take repair contracts from the office to fix them for scrap.")]
     public class PublicWorks : RustPlugin
     {
@@ -209,6 +209,14 @@ namespace Oxide.Plugins
                 ["UiOrderDesc"] = "Roadside pole at grid {0}; a crew drives out once it's paid",
                 ["UiOrderPay"] = "PAY {0}",
                 ["UiOrderCrew"] = "CREW EN ROUTE",
+                ["UiAccounts"] = "MY ACCOUNTS ▸",
+                ["UiServices"] = "◂ SERVICES",
+                ["UiAccountsSubtitle"] = "Your accounts with other island services — settled here at the office",
+                ["UiAccountsSubtitlePhone"] = "Phone line — your accounts with other island services, plus a {0} scrap convenience fee per payment",
+                ["UiAccountPay"] = "PAY {0}",
+                ["AccountNeedScrap"] = "you need {0} scrap to pay for {1}.",
+                ["AccountPaid"] = "paid {0} scrap — {1}.",
+                ["AccountRefused"] = "{0} couldn't take the payment — your scrap has been refunded.",
                 ["UiPoleNote"] = "Pole transformers read 0 on the wire tool while the plant has no fuses — the power still flows.",
                 ["PoleRemoved"] = "Purchased transformer removed from this pole.",
                 ["PoleNotPurchased"] = "No purchased transformer on a pole within reach — map-spawned ones are left alone.",
@@ -852,6 +860,10 @@ namespace Oxide.Plugins
             SyncPoleHookups();
             FitPaidOrders();
             CreateOfficePhone();
+
+            // Plugins that bill through the office register on this (their earlier
+            // registrations died with the previous load of this plugin).
+            Interface.CallHook("OnPublicWorksReady");
 
             // Faults on services Cobalt has shelved are moot — drop them before markers spawn.
             for (int i = data.Faults.Count - 1; i >= 0; i--)
@@ -4838,6 +4850,8 @@ namespace Oxide.Plugins
                     if (player != null)
                     {
                         phoneSessions.Remove((ulong)player.userID);
+                        accountsViews.Remove((ulong)player.userID);
+                        readOnlyViews.Remove((ulong)player.userID);
                         CuiHelper.DestroyUi(player, UiPanelName);
                     }
                     return;
@@ -4848,6 +4862,24 @@ namespace Oxide.Plugins
                     // Must be at the office or on the phone line (admins exempt) — the CUI only opens there, but re-check server-side.
                     if (!CanTransact(player)) return;
                     TryPurchase(player, arg.GetString(1), PhoneFee(player));
+                    RefreshPanel(player);
+                    return;
+                }
+
+                case "view":
+                {
+                    if (player == null) return;
+                    if (arg.GetString(1) == "accounts") accountsViews.Add((ulong)player.userID);
+                    else accountsViews.Remove((ulong)player.userID);
+                    RefreshPanel(player);
+                    return;
+                }
+
+                case "account":
+                {
+                    if (player == null) return;
+                    if (!CanTransact(player)) return;
+                    PayBillable(player, arg.GetString(1), arg.GetString(2), PhoneFee(player));
                     RefreshPanel(player);
                     return;
                 }
@@ -4931,13 +4963,20 @@ namespace Oxide.Plugins
         private bool CanTransact(BasePlayer player) =>
             IsAdmin(player) || AtOffice(player) || phoneSessions.Contains((ulong)player.userID);
 
+        // Panel state that has to survive a redraw: who is looking at the read-only
+        // status view, and who has flipped to the accounts page.
+        private readonly HashSet<ulong> readOnlyViews = new HashSet<ulong>();
+        private readonly HashSet<ulong> accountsViews = new HashSet<ulong>();
+
         private void RefreshPanel(BasePlayer player) =>
-            ShowPanel(player, true, phoneSessions.Contains((ulong)player.userID));
+            ShowPanel(player, !readOnlyViews.Contains((ulong)player.userID), phoneSessions.Contains((ulong)player.userID));
 
         private void ShowPanel(BasePlayer player, bool interactive = true, bool phone = false)
         {
             if (phone) phoneSessions.Add((ulong)player.userID);
             else phoneSessions.Remove((ulong)player.userID);
+            if (interactive) readOnlyViews.Remove((ulong)player.userID);
+            else readOnlyViews.Add((ulong)player.userID);
 
             CuiHelper.DestroyUi(player, UiPanelName);
             var ui = new CuiElementContainer();
@@ -4950,6 +4989,10 @@ namespace Oxide.Plugins
             }, "Overlay", UiPanelName);
 
             string uid = player.UserIDString;
+
+            // Bills other plugins have registered with the office get a page of their own.
+            var accounts = VisibleBillables(player);
+            bool accountsView = accounts.Count > 0 && accountsViews.Contains((ulong)player.userID);
             ui.Add(new CuiLabel
             {
                 Text = { Text = Msg("UiTitle", uid), FontSize = 18, Align = TextAnchor.MiddleCenter, Color = ColTitle },
@@ -4957,7 +5000,7 @@ namespace Oxide.Plugins
             }, panel);
             ui.Add(new CuiLabel
             {
-                Text = { Text = phone ? Msg("UiSubtitlePhone", uid, config.PricePerDay, Mathf.Max(0, config.PhoneFee)) : Msg("UiSubtitle", uid, config.PricePerDay), FontSize = 11, Align = TextAnchor.MiddleCenter, Color = ColDim },
+                Text = { Text = PanelSubtitle(uid, accountsView, phone), FontSize = 11, Align = TextAnchor.MiddleCenter, Color = ColDim },
                 RectTransform = { AnchorMin = "0 0.895", AnchorMax = "1 0.935" }
             }, panel);
             ui.Add(new CuiButton
@@ -4966,6 +5009,24 @@ namespace Oxide.Plugins
                 Text = { Text = "✕", FontSize = 13, Align = TextAnchor.MiddleCenter, Color = ColText },
                 RectTransform = { AnchorMin = "0.93 0.945", AnchorMax = "0.985 0.99" }
             }, panel);
+
+            // Added after the title label: the label spans the full width and would
+            // swallow the click otherwise.
+            if (accounts.Count > 0)
+                ui.Add(new CuiButton
+                {
+                    Button = { Color = ColBtn, Command = accountsView ? "pw.cmd view services" : "pw.cmd view accounts" },
+                    Text = { Text = Msg(accountsView ? "UiServices" : "UiAccounts", uid), FontSize = 10, Align = TextAnchor.MiddleCenter, Color = ColText },
+                    RectTransform = { AnchorMin = "0.03 0.945", AnchorMax = "0.24 0.99" }
+                }, panel);
+
+            if (accountsView)
+            {
+                DrawAccounts(ui, panel, player, accounts, interactive);
+                AddPanelFooter(ui, panel, player, interactive);
+                CuiHelper.AddUi(player, ui);
+                return;
+            }
 
             // The rows share the band between the subtitle (0.885) and the note line
             // (0.145): nine services, plus one more when the player has a work order.
@@ -5150,17 +5211,30 @@ namespace Oxide.Plugins
                 }
             }
 
+            AddPanelFooter(ui, panel, player, interactive);
+            CuiHelper.AddUi(player, ui);
+        }
+
+        private string PanelSubtitle(string uid, bool accountsView, bool phone)
+        {
+            int fee = Mathf.Max(0, config.PhoneFee);
+            if (accountsView) return phone ? Msg("UiAccountsSubtitlePhone", uid, fee) : Msg("UiAccountsSubtitle", uid);
+            return phone ? Msg("UiSubtitlePhone", uid, config.PricePerDay, fee) : Msg("UiSubtitle", uid, config.PricePerDay);
+        }
+
+        private void AddPanelFooter(CuiElementContainer ui, string panel, BasePlayer player, bool interactive)
+        {
+            string uid = player.UserIDString;
             ui.Add(new CuiLabel
             {
                 Text = { Text = Msg("UiPoleNote", uid), FontSize = 9, Align = TextAnchor.MiddleCenter, Color = ColDim },
                 RectTransform = { AnchorMin = "0 0.108", AnchorMax = "1 0.14" }
             }, panel);
-
             ui.Add(new CuiLabel
             {
                 Text =
                 {
-                    Text = Msg("UiFooter", uid, burnNow.ToString("F2"), HumanCount(), config.MaxPrepaidDays),
+                    Text = Msg("UiFooter", uid, BurnRate().ToString("F2"), HumanCount(), config.MaxPrepaidDays),
                     FontSize = 10, Align = TextAnchor.MiddleCenter, Color = ColDim
                 },
                 RectTransform = { AnchorMin = "0 0.065", AnchorMax = "1 0.105" }
@@ -5174,8 +5248,197 @@ namespace Oxide.Plugins
                 },
                 RectTransform = { AnchorMin = "0 0.015", AnchorMax = "1 0.06" }
             }, panel);
+        }
 
-            CuiHelper.AddUi(player, ui);
+        private void DrawAccounts(CuiElementContainer ui, string panel, BasePlayer player, List<BillRow> accounts, bool interactive)
+        {
+            string uid = player.UserIDString;
+            float top = 0.885f;
+            float rowH = 0.74f / ServiceKeys.Length; // same row height as the services page
+            int rows = Mathf.Min(accounts.Count, ServiceKeys.Length);
+            for (int i = 0; i < rows; i++)
+            {
+                var row = accounts[i];
+                float y1 = top - (i + 1) * rowH + 0.008f;
+                float y2 = top - i * rowH;
+
+                ui.Add(new CuiPanel
+                {
+                    Image = { Color = ColRow },
+                    RectTransform = { AnchorMin = $"0.03 {y1}", AnchorMax = $"0.97 {y2}" }
+                }, panel);
+                ui.Add(new CuiPanel
+                {
+                    Image = { Color = row.Active ? ColActive : ColInactive },
+                    RectTransform = { AnchorMin = $"0.045 {y1 + 0.028f}", AnchorMax = $"0.062 {y2 - 0.028f}" }
+                }, panel);
+                ui.Add(new CuiLabel
+                {
+                    Text = { Text = row.Label, FontSize = 13, Align = TextAnchor.MiddleLeft, Color = ColText },
+                    RectTransform = { AnchorMin = $"0.08 {y1 + (y2 - y1) * 0.45f}", AnchorMax = $"0.62 {y2}" }
+                }, panel);
+                ui.Add(new CuiLabel
+                {
+                    Text = { Text = row.Description, FontSize = 9, Align = TextAnchor.UpperLeft, Color = ColDim },
+                    RectTransform = { AnchorMin = $"0.08 {y1}", AnchorMax = $"0.62 {y1 + (y2 - y1) * 0.48f}" }
+                }, panel);
+                ui.Add(new CuiLabel
+                {
+                    Text =
+                    {
+                        Text = row.Status, FontSize = 10, Align = TextAnchor.MiddleCenter,
+                        Color = row.Active ? "0.55 0.83 0.35 1" : "0.85 0.45 0.45 1"
+                    },
+                    RectTransform = { AnchorMin = $"0.625 {y1}", AnchorMax = $"0.785 {y2}" }
+                }, panel);
+
+                if (interactive && row.Price > 0)
+                {
+                    ui.Add(new CuiButton
+                    {
+                        Button = { Color = row.Active ? ColBtn : ColActive, Command = $"pw.cmd account {row.Bill.Owner.Name} {row.Bill.Key}" },
+                        Text =
+                        {
+                            Text = string.IsNullOrEmpty(row.Button) ? Msg("UiAccountPay", uid, row.Price) : row.Button,
+                            FontSize = 10, Align = TextAnchor.MiddleCenter, Color = ColText
+                        },
+                        RectTransform = { AnchorMin = $"0.80 {y1 + 0.012f}", AnchorMax = $"0.955 {y2 - 0.012f}" }
+                    }, panel);
+                }
+                else if (row.Price > 0)
+                {
+                    ui.Add(new CuiLabel
+                    {
+                        Text = { Text = row.Price.ToString(), FontSize = 10, Align = TextAnchor.MiddleCenter, Color = ColDim },
+                        RectTransform = { AnchorMin = $"0.80 {y1 + 0.012f}", AnchorMax = $"0.955 {y2 - 0.012f}" }
+                    }, panel);
+                }
+            }
+        }
+
+        #endregion
+
+        #region Billing interface (other plugins bill through the office)
+
+        // The office is the island's one payment desk. Another plugin registers a bill
+        // with RegisterBillable(this, "key") and implements two methods of its own:
+        //
+        //   Dictionary<string, object> PublicWorksBillQuery(BasePlayer player, string key)
+        //     What this player's row shows right now, or null for no row. Keys, all
+        //     optional but Label: "Label", "Description", "Status" (strings),
+        //     "Price" (int scrap, 0 = nothing to pay), "Button" (string, default
+        //     "PAY <price>"), "Active" (bool, the row's status light).
+        //
+        //   object PublicWorksBillPaid(BasePlayer player, string key, int scrap)
+        //     The player paid. Return false to refuse — the office refunds the scrap.
+        //
+        // The row sits on the panel's accounts page, at the clerk and over the phone
+        // line (with the convenience fee). Registrations go when either plugin unloads;
+        // OnPublicWorksReady says when to register again.
+        private class Billable
+        {
+            public Plugin Owner;
+            public string Key;
+        }
+
+        private class BillRow
+        {
+            public Billable Bill;
+            public string Label, Description, Status, Button;
+            public int Price;
+            public bool Active;
+        }
+
+        private readonly List<Billable> billables = new List<Billable>();
+
+        private bool RegisterBillable(Plugin owner, string key)
+        {
+            if (owner == null || string.IsNullOrEmpty(key) || key.Contains(" ")) return false;
+            if (!billables.Any(b => b.Owner == owner && b.Key == key))
+                billables.Add(new Billable { Owner = owner, Key = key });
+            return true;
+        }
+
+        private void UnregisterBillable(Plugin owner, string key) =>
+            billables.RemoveAll(b => b.Owner == owner && (key == null || b.Key == key));
+
+        // Where a plugin can send its customers to pay.
+        private int GetOfficePhoneNumber() => officePhone != null ? officePhone.Controller.PhoneNumber : 0;
+
+        private string GetOfficeGrid() => clerk != null ? MapHelper.PositionToString(clerk.transform.position) : null;
+
+        private void OnPluginUnloaded(Plugin plugin) => billables.RemoveAll(b => b.Owner == plugin);
+
+        private BillRow QueryBillable(Billable bill, BasePlayer player)
+        {
+            if (bill.Owner == null || !bill.Owner.IsLoaded) return null;
+            Dictionary<string, object> info;
+            try { info = bill.Owner.Call("PublicWorksBillQuery", player, bill.Key) as Dictionary<string, object>; }
+            catch (Exception e)
+            {
+                PrintWarning($"{bill.Owner.Name} failed to describe its bill '{bill.Key}': {e.Message}");
+                return null;
+            }
+            if (info == null) return null;
+
+            var row = new BillRow { Bill = bill };
+            object value;
+            row.Label = info.TryGetValue("Label", out value) && value != null ? value.ToString() : bill.Owner.Title;
+            row.Description = info.TryGetValue("Description", out value) && value != null ? value.ToString() : "";
+            row.Status = info.TryGetValue("Status", out value) && value != null ? value.ToString() : "";
+            row.Button = info.TryGetValue("Button", out value) && value != null ? value.ToString() : null;
+            row.Active = info.TryGetValue("Active", out value) && value is bool && (bool)value;
+            try { row.Price = info.TryGetValue("Price", out value) && value != null ? Mathf.Max(0, Convert.ToInt32(value)) : 0; }
+            catch { row.Price = 0; }
+            return row;
+        }
+
+        private List<BillRow> VisibleBillables(BasePlayer player)
+        {
+            var rows = new List<BillRow>();
+            for (int i = billables.Count - 1; i >= 0; i--)
+                if (billables[i].Owner == null || !billables[i].Owner.IsLoaded) billables.RemoveAt(i);
+            foreach (var bill in billables)
+            {
+                var row = QueryBillable(bill, player);
+                if (row != null) rows.Add(row);
+            }
+            return rows;
+        }
+
+        private void PayBillable(BasePlayer player, string ownerName, string key, int phoneFee)
+        {
+            var bill = billables.FirstOrDefault(b => b.Owner != null && b.Owner.Name == ownerName && b.Key == key);
+            var row = bill != null ? QueryBillable(bill, player) : null; // price as of now, not as of the last draw
+            if (row == null || row.Price <= 0) return;
+
+            int total = row.Price + phoneFee;
+            var def = ItemManager.FindItemDefinition(ScrapShortname);
+            if (def == null) return;
+            if (player.inventory.GetAmount(def.itemid) < total)
+            {
+                Reply(player, "AccountNeedScrap", total, row.Label);
+                return;
+            }
+            player.inventory.Take(null, def.itemid, total);
+
+            object answer = null;
+            try { answer = bill.Owner.Call("PublicWorksBillPaid", player, key, row.Price); }
+            catch (Exception e)
+            {
+                PrintWarning($"{bill.Owner.Name} failed to take payment for '{key}': {e.Message}");
+                answer = false;
+            }
+            if (answer is bool && !(bool)answer)
+            {
+                var refund = ItemManager.CreateByName(ScrapShortname, total);
+                if (refund != null) player.GiveItem(refund);
+                Reply(player, "AccountRefused", row.Label);
+                return;
+            }
+
+            Reply(player, "AccountPaid", total, row.Label);
+            Interface.CallHook("OnPublicWorksBillPaid", player, ownerName, key, row.Price);
         }
 
         #endregion

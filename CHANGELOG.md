@@ -5,6 +5,14 @@ All notable changes to PublicWorks are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.11.0] - 2026-10-03
+
+### Added
+- Billing interface for other plugins: a plugin registers a bill with `RegisterBillable` and it appears on a new **MY ACCOUNTS** page of the services panel, at the clerk and over the phone line. Public Works takes the scrap (plus the phone fee when called in) and hands the payment to the plugin, refunding it if the plugin refuses. See "Billing interface for other plugins" in the README.
+- Hooks `OnPublicWorksReady()` and `OnPublicWorksBillPaid(BasePlayer player, string ownerPlugin, string key, int scrap)`, and API calls `GetOfficePhoneNumber()` and `GetOfficeGrid()`.
+
+No change for servers without a plugin that uses it: the accounts button only appears when there is an account to show.
+
 ## [2.10.0] - 2026-10-03
 
 ### Added
