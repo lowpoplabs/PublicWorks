@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("PublicWorks", "LowPopLabs", "2.11.0")]
+    [Info("PublicWorks", "LowPopLabs", "2.11.1")]
     [Description("A Public Works office: pay a clerk NPC scrap to keep island utilities running — power, water, gas, markets, garages, airport, internet, free trains, and Cobalt protection (reactive-only patrol heli & Bradley). Random faults break out at monuments; players take repair contracts from the office to fix them for scrap.")]
     public class PublicWorks : RustPlugin
     {
@@ -746,6 +746,7 @@ namespace Oxide.Plugins
 
         private const string PrefabRecycler = "recycler_static";
         private const string PrefabPowerline = "powergrid_powerline_io.static";
+        private const string PrefabRoomGenerator = "generator.static_hidden";
 
         // service key -> powergrid entities that service force-powers
         private readonly Dictionary<string, List<IPowergridEntity>> serviceEntities =
@@ -1088,6 +1089,19 @@ namespace Oxide.Plugins
                 return "gas";
 
             string monument = GetMonumentName(entity.transform.position);
+
+            // Grid-powered rooms (October 2026 Rust update): each one hangs off a hidden
+            // generator that only runs at a minimum grid stage (1-3, by monument tier).
+            // They are island power, so they follow Electricity wherever they stand —
+            // including inside another service's monument and just outside a monument's
+            // bounds. Gas stations use the no-reset generator for theirs.
+            if (entity is ElectricGenerator)
+            {
+                if (entity.ShortPrefabName == PrefabRoomGenerator) return "electricity";
+                string g = monument?.ToLower();
+                if (g != null && (g.Contains("oxum") || g.Contains("gas station"))) return "electricity";
+            }
+
             if (monument != null)
             {
                 string m = monument.ToLower();

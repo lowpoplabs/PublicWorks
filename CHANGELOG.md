@@ -5,6 +5,11 @@ All notable changes to PublicWorks are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.11.1] - 2026-10-05
+
+### Fixed
+- The grid-powered locked rooms the October 2026 Rust update added to monuments now open up while the Electricity service is paid. Each room runs off a hidden generator that needs a minimum power grid stage, and the plugin only claimed the one at the Power Plant: rooms at monuments with no service (Harbor, Junkyard, Ferry Terminal, Train Yard, Sewer Branch, Radtown, Missile Silo and others) stayed dark without real fuses in the plant, and rooms inside another service's monument (Water Treatment Plant, Launch Site, Airfield, supermarkets, gas stations) followed that service instead. All of them now follow Electricity. A minor electricity fault drops the grid to half, which keeps the lower-tier rooms open and shuts the ones that need stage 3.
+
 ## [2.11.0] - 2026-10-03
 
 ### Added
