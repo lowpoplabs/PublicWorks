@@ -1090,21 +1090,18 @@ namespace Oxide.Plugins
 
             string monument = GetMonumentName(entity.transform.position);
 
-            // Grid-powered rooms (October 2026 Rust update): each one hangs off a hidden
-            // generator that only runs at a minimum grid stage (1-3, by monument tier).
-            // They are island power, so they follow Electricity wherever they stand —
-            // including inside another service's monument and just outside a monument's
-            // bounds. Gas stations use the no-reset generator for theirs.
-            if (entity is ElectricGenerator)
-            {
-                if (entity.ShortPrefabName == PrefabRoomGenerator) return "electricity";
-                string g = monument?.ToLower();
-                if (g != null && (g.Contains("oxum") || g.Contains("gas station"))) return "electricity";
-            }
-
             if (monument != null)
             {
                 string m = monument.ToLower();
+
+                // Grid-powered rooms (October 2026 Rust update): each one hangs off a hidden
+                // generator that only runs at a minimum grid stage (1-3, by monument tier).
+                // Supermarket and gas station rooms are part of the Markets and Garages
+                // services (below); every other room is island power and follows Electricity
+                // even inside another service's monument.
+                if (entity.ShortPrefabName == PrefabRoomGenerator &&
+                    !m.Contains("supermarket") && !m.Contains("oxum") && !m.Contains("gas station"))
+                    return "electricity";
                 if (m.Contains("power plant")) return "electricity";
                 if (m.Contains("water treatment")) return "water";
                 if (m.Contains("dome")) return "gas";
@@ -1119,6 +1116,7 @@ namespace Oxide.Plugins
             // 50% recycle efficiency, powered they return to 60% plus a speed buff at
             // max stage. Everything else (oil rigs) stays vanilla.
             if (entity.ShortPrefabName == PrefabPowerline) return "electricity";
+            if (entity.ShortPrefabName == PrefabRoomGenerator) return "electricity"; // room generator just outside its monument's bounds
             if (config.ElectricityPowersRecyclers && entity.ShortPrefabName == PrefabRecycler) return "electricity";
             return null;
         }
