@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("PublicWorks", "LowPopLabs", "2.11.1")]
+    [Info("PublicWorks", "LowPopLabs", "2.11.2")]
     [Description("A Public Works office: pay a clerk NPC scrap to keep island utilities running — power, water, gas, markets, garages, airport, internet, free trains, and Cobalt protection (reactive-only patrol heli & Bradley). Random faults break out at monuments; players take repair contracts from the office to fix them for scrap.")]
     public class PublicWorks : RustPlugin
     {
@@ -896,9 +896,7 @@ namespace Oxide.Plugins
             SaveData();
             ReleaseAirport();
 
-            RunConVar("satellite.require_powerplant", origSatelliteRequirePowerplant ? "true" : "false");
-            RunConVar("satellite.free_power", origSatelliteFreePower ? "true" : "false");
-            RunConVar("satellite.free_fuel", origSatelliteFreeFuel ? "true" : "false");
+            RestoreSatelliteConVars();
             ApplyPoleMultiplier(false);
             poleServiceEnergy = 0;
             int realStage = Manager != null ? Manager.CurrentStage : 0;
@@ -1159,6 +1157,21 @@ namespace Oxide.Plugins
         private void RunConVar(string convar, string value) =>
             ConsoleSystem.Run(ConsoleSystem.Option.Server.Quiet(), convar, value);
 
+        // The satellite convars are re-asserted every tick; only send when the live
+        // value differs, so the command history is not flooded with no-op writes.
+        private void SetSatelliteConVar(string convar, bool current, bool want)
+        {
+            if (current == want) return;
+            RunConVar(convar, want ? "true" : "false");
+        }
+
+        private void RestoreSatelliteConVars()
+        {
+            SetSatelliteConVar("satellite.require_powerplant", ConVar.Satellite.require_powerplant, origSatelliteRequirePowerplant);
+            SetSatelliteConVar("satellite.free_power", ConVar.Satellite.free_power, origSatelliteFreePower);
+            SetSatelliteConVar("satellite.free_fuel", ConVar.Satellite.free_fuel, origSatelliteFreeFuel);
+        }
+
         private int HumanCount()
         {
             int humans = 0;
@@ -1418,18 +1431,16 @@ namespace Oxide.Plugins
                 case "internet":
                     if (level <= 0f)
                     {
-                        RunConVar("satellite.require_powerplant", origSatelliteRequirePowerplant ? "true" : "false");
-                        RunConVar("satellite.free_power", origSatelliteFreePower ? "true" : "false");
-                        RunConVar("satellite.free_fuel", origSatelliteFreeFuel ? "true" : "false");
+                        RestoreSatelliteConVars();
                     }
                     else
                     {
-                        RunConVar("satellite.require_powerplant", "false");
+                        SetSatelliteConVar("satellite.require_powerplant", ConVar.Satellite.require_powerplant, false);
                         if (config.InternetFreeSatellite)
                         {
                             // Minor fault: the dish stays online but the free-items perk is suspended.
-                            RunConVar("satellite.free_power", level >= 1f || origSatelliteFreePower ? "true" : "false");
-                            RunConVar("satellite.free_fuel", level >= 1f || origSatelliteFreeFuel ? "true" : "false");
+                            SetSatelliteConVar("satellite.free_power", ConVar.Satellite.free_power, level >= 1f || origSatelliteFreePower);
+                            SetSatelliteConVar("satellite.free_fuel", ConVar.Satellite.free_fuel, level >= 1f || origSatelliteFreeFuel);
                         }
                     }
                     break;
@@ -1504,9 +1515,7 @@ namespace Oxide.Plugins
                     ReleaseAirport();
                     break;
                 case "internet":
-                    RunConVar("satellite.require_powerplant", origSatelliteRequirePowerplant ? "true" : "false");
-                    RunConVar("satellite.free_power", origSatelliteFreePower ? "true" : "false");
-                    RunConVar("satellite.free_fuel", origSatelliteFreeFuel ? "true" : "false");
+                    RestoreSatelliteConVars();
                     break;
                 case ProtectionKey:
                     // Vanilla resumes instantly (hooks go inert); forget who was hostile.

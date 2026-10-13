@@ -5,6 +5,11 @@ All notable changes to PublicWorks are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.11.2] - 2026-10-13
+
+### Fixed
+- The Internet service re-sent its three `satellite.*` convars on every tick (about 8,400 server command-history lines a day at the default 30 seconds) even when nothing had changed. They are now only sent when the live value differs from the one wanted, so a steady service writes nothing. Behaviour is unchanged: the dish still ignores the power plant while Internet is paid, and the free-items perk still follows minor faults and the `Internet service also makes the satellite item-free` setting.
+
 ## [2.11.1] - 2026-10-05
 
 ### Fixed
