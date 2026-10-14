@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("PublicWorks", "LowPopLabs", "2.11.2")]
+    [Info("PublicWorks", "LowPopLabs", "2.11.3")]
     [Description("A Public Works office: pay a clerk NPC scrap to keep island utilities running — power, water, gas, markets, garages, airport, internet, free trains, and Cobalt protection (reactive-only patrol heli & Bradley). Random faults break out at monuments; players take repair contracts from the office to fix them for scrap.")]
     public class PublicWorks : RustPlugin
     {
@@ -2447,6 +2447,20 @@ namespace Oxide.Plugins
         private object OnNpcTarget(BaseEntity npc, BaseEntity target)
         {
             if (clerk != null && (npc == clerk || target == clerk)) return true;
+            return null;
+        }
+
+        // KpucTaJl's NpcSpawn (the brain behind BetterNpc) never reaches OnNpcTarget:
+        // its CustomScientistNpc hides GetBestTarget and walks its sense memory
+        // itself, asking its own hook first — OnCustomNpcTarget(CustomScientistNpc
+        // npc, BaseCombatEntity target) — where ONLY a bool answer counts: false =
+        // never a target, true = always, anything else = its own rules. Those rules
+        // sort the clerk's Steam-range face seed into the "player" bucket, where no
+        // ignore list applies. Verified against NpcSpawn 3.4.8 (2026-10-13).
+        // Declared on base types so this compiles with or without NpcSpawn present.
+        private object OnCustomNpcTarget(BaseEntity npc, BaseEntity target)
+        {
+            if (clerk != null && target == clerk) return false;
             return null;
         }
 

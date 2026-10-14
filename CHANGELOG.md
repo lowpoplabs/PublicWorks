@@ -5,6 +5,11 @@ All notable changes to PublicWorks are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.11.3] - 2026-10-13
+
+### Fixed
+- NPCs driven by KpucTaJl's NpcSpawn (the brain behind BetterNpc and the rest of that plugin family) could pick the office clerk as a target. NpcSpawn's custom scientist replaces the game's best-target method and walks its sense memory itself, so Oxide's `OnNpcTarget` never fires for it, and the clerk's Steam-range face seed puts the clerk in its "player" bucket, where none of its ignore lists apply. Public Works now answers NpcSpawn's own veto hook, `OnCustomNpcTarget`, with `false` for the clerk (verified against NpcSpawn 3.4.8: only a boolean answer counts, and `false` means never a target). Declared on base types, so the plugin compiles with or without NpcSpawn installed. No config or data-file changes.
+
 ## [2.11.2] - 2026-10-13
 
 ### Fixed
