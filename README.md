@@ -76,6 +76,15 @@ with a convenience fee (10 scrap, configurable) added to each payment. Repair co
 are still handed out in person. Number, directory name, fee and an off switch are in
 the config under `Office phone line: ...`.
 
+### Running on the phone line alone (v2.12)
+
+Set `Office enabled` to `false` in the config and reload to do without the office: no
+clerk, radio or map marker. Everything happens over the phone, including taking repair
+contracts (free, no convenience fee), and chat messages give the number to call. The
+phone line has to stay on: with both turned off the office stays open and the server
+log says why. A building already pasted with CopyPaste stays standing until you run
+`/pw removeoffice`.
+
 ## Random fault events (v2)
 
 Roughly once a day (configurable), something **breaks** at a random *active* service:
@@ -475,7 +484,7 @@ private object PublicWorksBillPaid(BasePlayer player, string key, int scrap) => 
 ```
 
 - `RegisterBillable(Plugin owner, string key)` / `UnregisterBillable(Plugin owner, string key)`. Keys have no spaces. Registrations go when either plugin unloads; `OnPublicWorksReady` fires each time Public Works finishes loading, so register again there.
-- `GetOfficePhoneNumber()` returns the phone line's number (0 if off) and `GetOfficeGrid()` the office's map grid, for telling a customer where to pay.
+- `GetOfficePhoneNumber()` returns the phone line's number (0 if off) and `GetOfficeGrid()` the office's map grid (null if there's no office), for telling a customer where to pay.
 - `Price` 0 shows the row without a button. The price is read again at the moment of payment. The page shows up to nine rows.
 
 ## Compatibility notes

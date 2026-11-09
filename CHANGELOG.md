@@ -5,6 +5,13 @@ All notable changes to PublicWorks are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.12.0] - 2026-11-09
+
+### Added
+- New config setting `Office enabled`. Set it to `false` to run Public Works on the phone line alone: no clerk, radio or map marker, and everything happens over the phone. Paying for services, pole work orders, Protection billing holds and accounts from other plugins work as they already did by phone, convenience fee included. Repair contracts, normally handed out in person, can be taken over the phone on these servers, at no charge. Chat announcements and hints give the number to call instead of an office location, and `/pw setoffice`, `/pw setclerk` and `/pw setboombox` say the office is turned off. Protection billing holds have no red dot on the map in this mode.
+
+The setting needs the phone line on: with both turned off the office stays open and the server log says why. Defaults to `true`, so nothing changes unless you set it. A building already pasted with CopyPaste stays standing until you run `/pw removeoffice`.
+
 ## [2.11.3] - 2026-10-13
 
 ### Fixed

@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("PublicWorks", "LowPopLabs", "2.11.3")]
+    [Info("PublicWorks", "LowPopLabs", "2.12.0")]
     [Description("A Public Works office: pay a clerk NPC scrap to keep island utilities running — power, water, gas, markets, garages, airport, internet, free trains, and Cobalt protection (reactive-only patrol heli & Bradley). Random faults break out at monuments; players take repair contracts from the office to fix them for scrap.")]
     public class PublicWorks : RustPlugin
     {
@@ -203,6 +203,16 @@ namespace Oxide.Plugins
                 ["PoleFitted"] = "the crew has fitted your transformer at grid {0}. Climb the ladder and wire in with a wire tool — it's a public hookup and its output follows the power grid. The wire tool reads 0 on a pole; the power still flows.",
                 ["PoleFailed"] = "the crew couldn't fit a transformer here — your scrap has been refunded.",
                 ["PhoneHint"] = "or call the office on <color=#8bc34a>{0}</color> from any telephone to pay from afar (+{1} scrap per payment).",
+                // Wording for servers with the office turned off (phone line only).
+                ["PhoneOnly"] = "call the office on <color=#8bc34a>{0}</color> from any telephone to pay for services or take repair jobs (+{1} scrap per payment). Use <color=#8bc34a>/pwinfo</color> to check service status from anywhere.",
+                ["OfficeHintPhone"] = "Call the office on {0} from any telephone to pay your bill or take repair jobs.",
+                ["OfficeTurnedOff"] = "The office is turned off in the config (phone line only), so there is nothing to place.",
+                ["UiFaultByPhone"] = "call {0}",
+                ["ServiceLowPhone"] = "<color=#ffb74d>{0}</color> is running low — about {1} left at current usage. Call the office on <color=#8bc34a>{2}</color> to extend it!",
+                ["FaultAnnouncePhone"] = "<color=#e57373>{0}</color> at <color=#ffb74d>{1}</color> (grid {2}, red dot on the map) — {3} {4}. Repair crew ETA ~{5}. Repair contract by phone on <color=#8bc34a>{7}</color>: <color=#8bc34a>{6} scrap</color>.",
+                ["BillAnnouncePhone"] = "<color=#e57373>Cobalt Accounts</color> has put the <color=#ffb74d>Protection</color> account on hold — {0}. Settle the bill by calling the office on <color=#8bc34a>{5}</color>: <color=#8bc34a>{3} scrap</color>, plus the {6} scrap phone fee. Accounts clears it automatically in ~{4}.",
+                ["SiteNeedContractPhone"] = "this is the {0} fault site — call the office on <color=#8bc34a>{1}</color> and take the repair contract first.",
+                ["PoleOrderFiledPhone"] = "work order filed for the pole at grid {0}: <color=#8bc34a>{1} scrap</color>. Call the office on <color=#8bc34a>{3}</color> to pay it (+{4} scrap) and a crew will come out. <color=#8bc34a>/pw pole cancel</color> withdraws it.",
                 ["NeedScrapTotal"] = "you need {0} scrap for that ({1} + {2} phone fee).",
                 ["UiSubtitlePhone"] = "Phone line — {0} scrap per day each, plus a {1} scrap convenience fee per payment",
                 ["UiOrderLabel"] = "Work order — pole transformer",
@@ -290,6 +300,9 @@ namespace Oxide.Plugins
             // by Cobalt — they can't be paid for, never fault, and any banked time freezes.
             [JsonProperty("Disabled services (keys: electricity, water, gas, markets, garages, airport, internet, transportation, protection)", ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> DisabledServices = new List<string>();
+
+            [JsonProperty("Office enabled (false = phone line only: no clerk, radio or map marker. Needs the office phone line on; ignored without it)")]
+            public bool OfficeEnabled = true;
 
             // Defaults open the office inside Radtown's interior office on any map that
             // has one (coords are monument-local, so they fit every Radtown instance).
@@ -639,6 +652,9 @@ namespace Oxide.Plugins
                     if (IsService(key)) disabledServices.Add(key);
                     else PrintWarning($"Config lists unknown disabled service '{raw}' — valid keys: {string.Join(", ", ServiceKeys)}");
                 }
+
+            if (!config.OfficeEnabled && !config.PhoneEnabled)
+                PrintWarning("The office and its phone line are both turned off, which would leave players no way to pay — keeping the office open. Turn the phone line on to run without the office.");
         }
 
         protected override void SaveConfig()
@@ -1226,7 +1242,7 @@ namespace Oxide.Plugins
 
             // Players can toggle the boombox off (or the IO system can); keep the office
             // music on — and if something managed to destroy the box, replace it.
-            if (!string.IsNullOrEmpty(config.BoomboxStation) && (boombox == null || boombox.IsDestroyed))
+            if (!OfficeClosed && !string.IsNullOrEmpty(config.BoomboxStation) && (boombox == null || boombox.IsDestroyed))
             {
                 SpawnBoombox();
             }
@@ -1303,7 +1319,7 @@ namespace Oxide.Plugins
             if (due > warnLevel[key])
             {
                 warnLevel[key] = due;
-                AnnounceAll("ServiceLow", LabelFor(key, null), FormatSpan(eta));
+                AnnounceAll(OfficeKey("ServiceLow"), LabelFor(key, null), FormatSpan(eta), OfficeLineNumber);
             }
         }
 
@@ -1924,23 +1940,26 @@ namespace Oxide.Plugins
 
             if (service == ProtectionKey)
             {
-                AnnounceAll("BillAnnounce",
+                AnnounceAll(OfficeKey("BillAnnounce"),
                     Msg(severity == "major" ? "BillMajor" : "BillMinor", null),
                     monument,
                     MapHelper.PositionToString(site),
                     BillingFee(fault),
-                    FormatSpan(fault.Deadline - Now));
+                    FormatSpan(fault.Deadline - Now),
+                    OfficeLineNumber,
+                    Mathf.Max(0, config.PhoneFee));
                 return true;
             }
 
-            AnnounceAll("FaultAnnounce",
+            AnnounceAll(OfficeKey("FaultAnnounce"),
                 Msg("Flavor." + service, null),
                 monument,
                 MapHelper.PositionToString(site),
                 LabelFor(service, null),
                 Msg(severity == "major" ? "FaultDown" : "FaultHalf", null),
                 FormatSpan(fault.Deadline - Now),
-                RepairReward(fault));
+                RepairReward(fault),
+                OfficeLineNumber);
             return true;
         }
 
@@ -1953,6 +1972,13 @@ namespace Oxide.Plugins
             // the bill is settled at the office, so the "fault site" is the clerk.
             if (service == ProtectionKey)
             {
+                // Phone line only: the bill is settled by calling, so there's no place
+                // to mark (SpawnFaultMarker skips it and the panel shows the number).
+                if (OfficeClosed)
+                {
+                    monument = Msg("Site." + service, null);
+                    return true;
+                }
                 if (clerk == null || clerk.IsDestroyed) return false;
                 site = clerk.transform.position;
                 monument = GetMonumentName(site);
@@ -2055,6 +2081,7 @@ namespace Oxide.Plugins
         private void SpawnFaultMarker(FaultData fault)
         {
             KillFaultMarker(fault.Service);
+            if (OfficeClosed && fault.Service == ProtectionKey) return; // settled by phone, nowhere to go
             var m = GameManager.server.CreateEntity(MarkerPrefab, fault.Site) as MapMarkerGenericRadius;
             if (m == null) return;
             m.enableSaving = false;
@@ -2137,7 +2164,7 @@ namespace Oxide.Plugins
 
             if (!fault.Accepted.Contains((ulong)player.userID))
             {
-                Reply(player, "SiteNeedContract", LabelFor(fault.Service, player.UserIDString));
+                Reply(player, OfficeKey("SiteNeedContract"), LabelFor(fault.Service, player.UserIDString), OfficeLineNumber);
                 return;
             }
 
@@ -2250,6 +2277,12 @@ namespace Oxide.Plugins
         private void SpawnOffice()
         {
             KillOffice();
+            if (OfficeClosed)
+            {
+                Puts("Office turned off in the config — phone line only.");
+                return;
+            }
+
             Vector3 position;
             float rotationY;
             if (!TryResolveOfficeSpot(out position, out rotationY))
@@ -2530,7 +2563,7 @@ namespace Oxide.Plugins
         private void SpawnBoombox()
         {
             KillBoombox();
-            if (string.IsNullOrEmpty(config.BoomboxStation)) return;
+            if (OfficeClosed || string.IsNullOrEmpty(config.BoomboxStation)) return;
 
             Vector3 position;
             float rotationY;
@@ -3757,10 +3790,11 @@ namespace Oxide.Plugins
 
         private void ReplyOrderFiled(BasePlayer player, PoleOrder order)
         {
+            int fee = Mathf.Max(0, config.PhoneFee);
             string byPhone = officePhone != null
-                ? Msg("PoleOrderPhone", player.UserIDString, officePhone.Controller.PhoneNumber, Mathf.Max(0, config.PhoneFee))
+                ? Msg("PoleOrderPhone", player.UserIDString, officePhone.Controller.PhoneNumber, fee)
                 : "";
-            Reply(player, "PoleOrderFiled", MapHelper.PositionToString(order.Position), Mathf.Max(0, config.PoleHookupPrice), byPhone);
+            Reply(player, OfficeKey("PoleOrderFiled"), MapHelper.PositionToString(order.Position), Mathf.Max(0, config.PoleHookupPrice), byPhone, OfficeLineNumber, fee);
         }
 
         private bool PolePaidByOther(Vector3 polePosition, ulong userId)
@@ -4301,6 +4335,15 @@ namespace Oxide.Plugins
         private Telephone officePhone;
         private Timer phoneWatchdog;
 
+        // The office can be turned off so the phone line is the only way in. Never true
+        // with the line off too, or players would have no way to pay at all.
+        private bool OfficeClosed => !config.OfficeEnabled && config.PhoneEnabled;
+
+        // Messages that send players to the office have a "<key>Phone" twin for that case.
+        private string OfficeKey(string key) => OfficeClosed ? key + "Phone" : key;
+
+        private int OfficeLineNumber => officePhone?.Controller != null ? officePhone.Controller.PhoneNumber : config.PhoneNumber;
+
         private void CreateOfficePhone()
         {
             if (!config.PhoneEnabled) return;
@@ -4490,6 +4533,12 @@ namespace Oxide.Plugins
                     return;
                 }
 
+                if (OfficeClosed)
+                {
+                    Reply(player, "PhoneOnly", OfficeLineNumber, Mathf.Max(0, config.PhoneFee));
+                    return;
+                }
+
                 if (clerk != null)
                     Reply(player, "OfficeAt", MapHelper.PositionToString(clerk.transform.position));
                 else
@@ -4511,7 +4560,14 @@ namespace Oxide.Plugins
                 return;
             }
 
-            switch (args[0].ToLower())
+            string subcommand = args[0].ToLower();
+            if (OfficeClosed && (subcommand == "setoffice" || subcommand == "setclerk" || subcommand == "setboombox"))
+            {
+                ReplyRaw(player, "OfficeTurnedOff");
+                return;
+            }
+
+            switch (subcommand)
             {
                 case "setoffice":
                 {
@@ -4864,8 +4920,8 @@ namespace Oxide.Plugins
         }
 
         // Read-only status view, usable anywhere: shows every service and any active
-        // fault, but paying and taking contracts always require standing at the office
-        // (admins included — /pw is the interactive-anywhere panel).
+        // fault, but paying and taking contracts always require the office or the phone
+        // line (admins included — /pw is the interactive-anywhere panel).
         [ChatCommand("pwinfo")]
         private void CmdInfo(BasePlayer player, string command, string[] args)
         {
@@ -4931,10 +4987,10 @@ namespace Oxide.Plugins
                 case "job":
                 {
                     if (player == null) return;
-                    if (!IsAdmin(player) && !AtOffice(player)) return;
+                    if (!CanTakeJob(player)) return;
                     var fault = GetFault(arg.GetString(1));
-                    if (fault == null) { ShowPanel(player); return; } // resolved between render and click
-                    if (fault.Service == ProtectionKey) { TryPayBill(player, fault); ShowPanel(player); return; }
+                    if (fault == null) { RefreshPanel(player); return; } // resolved between render and click
+                    if (fault.Service == ProtectionKey) { TryPayBill(player, fault, PhoneFee(player)); RefreshPanel(player); return; }
                     if (!fault.Accepted.Contains((ulong)player.userID))
                     {
                         fault.Accepted.Add((ulong)player.userID);
@@ -4947,7 +5003,7 @@ namespace Oxide.Plugins
                         MaterialsText(RepairMaterialsFor(fault), player.UserIDString),
                         RepairReward(fault),
                         FormatSpan(fault.Deadline - Now));
-                    ShowPanel(player);
+                    RefreshPanel(player);
                     return;
                 }
 
@@ -4980,6 +5036,7 @@ namespace Oxide.Plugins
 
         private string OfficeHint(string userId)
         {
+            if (OfficeClosed) return Msg("OfficeHintPhone", userId, OfficeLineNumber);
             if (clerk == null) return Msg("OfficeHintNone", userId);
             string monument = GetMonumentName(clerk.transform.position);
             string grid = MapHelper.PositionToString(clerk.transform.position);
@@ -4997,6 +5054,10 @@ namespace Oxide.Plugins
 
         private bool CanTransact(BasePlayer player) =>
             IsAdmin(player) || AtOffice(player) || phoneSessions.Contains((ulong)player.userID);
+
+        // Repair contracts are handed out in person, unless there's no office to visit.
+        private bool CanTakeJob(BasePlayer player) =>
+            IsAdmin(player) || AtOffice(player) || (OfficeClosed && phoneSessions.Contains((ulong)player.userID));
 
         // Panel state that has to survive a redraw: who is looking at the read-only
         // status view, and who has flipped to the accounts page.
@@ -5148,16 +5209,19 @@ namespace Oxide.Plugins
                 {
                     // Cobalt isn't selling this one: no gauge, no price, no button.
                 }
-                else if (!interactive || (phone && fault != null && key != ProtectionKey))
+                else if (!interactive || (phone && fault != null && key != ProtectionKey && !OfficeClosed))
                 {
                     // Status view from afar (repair contracts are handed out in person,
-                    // not over the phone): the button slot shows where the fault is instead.
+                    // not over the phone, while there's an office): the button slot shows
+                    // where the fault is instead.
                     ui.Add(new CuiLabel
                     {
                         Text =
                         {
                             Text = fault != null
-                                ? Msg("UiFaultAt", uid, MapHelper.PositionToString(fault.Site))
+                                ? (OfficeClosed && key == ProtectionKey
+                                    ? Msg("UiFaultByPhone", uid, OfficeLineNumber)
+                                    : Msg("UiFaultAt", uid, MapHelper.PositionToString(fault.Site)))
                                 : Msg("UiPerDay", uid, config.PricePerDay),
                             FontSize = 10, Align = TextAnchor.MiddleCenter,
                             Color = fault != null ? "0.95 0.55 0.20 1" : ColDim
